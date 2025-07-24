@@ -1,0 +1,16 @@
+# Core AI/LLM Dependencies
+openai>=1.35.0
+langchain>=0.2.0
+langchain-openai>=0.1.0
+langgraph>=0.1.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Data Handling
+pydantic>=2.0.0
+
+# Development Tools (we'll add these later when needed)
+# pytest>=8.0.0
+# black>=24.0.0
+# isort>=5.13.0
