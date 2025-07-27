@@ -163,24 +163,11 @@ async def classify_ticket(pipeline, ticket_text: str, ticket_id: str = None) -> 
     try:
         logger.info(f"Classifying ticket: {ticket_id or 'auto-generated'}")
         
-        # Create ticket state
-        state = pipeline.state_manager.create_ticket_state(
-            original_text=ticket_text,
-            ticket_id=ticket_id
-        )
+        # Use the pipeline's classify_ticket method directly
+        result = await pipeline.classify_ticket(ticket_text, ticket_id)
         
-        # Process through the pipeline
-        result = await pipeline.process_ticket(state)
-        
-        logger.info(f"Classification completed for ticket {result.ticket_id}")
-        return {
-            "ticket_id": result.ticket_id,
-            "category": getattr(result, 'predicted_category', None),
-            "subcategory": getattr(result, 'predicted_subcategory', None),
-            "confidence": getattr(result, 'confidence_score', 0.0),
-            "processing_time_ms": getattr(result, 'total_processing_time_ms', 0),
-            "status": result.status.value if hasattr(result, 'status') else "unknown"
-        }
+        logger.info(f"Classification completed for ticket {ticket_id}")
+        return result
         
     except Exception as e:
         logger.error(f"Ticket classification failed: {e}")
