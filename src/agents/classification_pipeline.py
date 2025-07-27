@@ -106,6 +106,48 @@ class ClassificationPipeline:
         
         self.logger.info("Classification pipeline initialized successfully")
     
+    @classmethod
+    async def create(cls, 
+                     config_path: Optional[str] = None,
+                     hierarchy: Optional[ClassificationHierarchy] = None,
+                     qdrant_client=None):
+        """
+        Async factory method to properly initialize ClassificationPipeline.
+        
+        Args:
+            config_path: Path to configuration file
+            hierarchy: Classification hierarchy (optional, will load if not provided)
+            qdrant_client: Qdrant client for vector operations (optional)
+            
+        Returns:
+            Fully initialized ClassificationPipeline
+        """
+        instance = cls(config_path, hierarchy, qdrant_client)
+        await instance._async_initialize()
+        return instance
+    
+    async def _async_initialize(self):
+        """Complete async initialization of the pipeline"""
+        # Re-initialize category classifier with async factory
+        if hasattr(self, 'category_classifier'):
+            api_key = self.config.get('openai', {}).get('api_key')
+            category_config = BaseAgentConfig(
+                agent_name="category_classifier",
+                model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
+                temperature=self.config.get('openai', {}).get('temperature', 0.1),
+                max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
+                api_key=api_key
+            )
+            
+            self.category_classifier = await CategoryClassifierAgent.create(
+                config=category_config,
+                hierarchy=self.hierarchy,
+                qdrant_url=self.config.get('qdrant', {}).get('host', 'http://localhost:6333'),
+                collection_name=self.config.get('qdrant', {}).get('collection_name', 'itsm_categories')
+            )
+            
+            self.logger.info("Async initialization completed for category classifier")
+    
     def _load_config(self, config_path: Optional[str] = None) -> Dict[str, Any]:
         """Load configuration from file or use defaults."""
         default_config = {
@@ -143,8 +185,9 @@ class ClassificationPipeline:
     def _load_hierarchy(self) -> ClassificationHierarchy:
         """Load classification hierarchy from configuration."""
         try:
-            # Load from configuration file or default location
-            hierarchy_path = self.config.get('classification', {}).get('hierarchy_path', 'data/classification_hierarchy.json')
+            # Load from configuration file or default CSV location
+            hierarchy_path = self.config.get('classification', {}).get('hierarchy_path', 'Category + Subcategory.csv')
+            self.logger.info(f"Loading hierarchy from: {hierarchy_path}")
             return ClassificationHierarchy.load_from_file(hierarchy_path)
         except Exception as e:
             self.logger.warning(f"Could not load hierarchy from file: {e}")
@@ -200,33 +243,42 @@ class ClassificationPipeline:
     
     def _initialize_agents(self, qdrant_client=None):
         """Initialize all agents with proper configuration."""
+        # Get OpenAI API key from config
+        api_key = self.config.get('openai', {}).get('api_key')
+        if not api_key:
+            raise ValueError("OpenAI API key is required in configuration")
+        
         # Create base configs for each agent
         orchestrator_config = BaseAgentConfig(
             agent_name="orchestrator",
             model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
             temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000)
+            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
+            api_key=api_key
         )
         
         arabic_config = BaseAgentConfig(
             agent_name="arabic_processor",
             model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
             temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000)
+            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
+            api_key=api_key
         )
         
         category_config = BaseAgentConfig(
             agent_name="category_classifier",
             model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
             temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000)
+            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
+            api_key=api_key
         )
         
         subcategory_config = BaseAgentConfig(
             agent_name="subcategory_classifier",
             model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
             temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000)
+            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
+            api_key=api_key
         )
         
         # Initialize agents
@@ -238,9 +290,13 @@ class ClassificationPipeline:
             
             self.arabic_processor = ArabicProcessingAgent(config=arabic_config)
             
+            # Note: CategoryClassifierAgent will need async initialization
+            # This will be handled in the async_initialize method
             self.category_classifier = CategoryClassifierAgent(
                 config=category_config,
-                hierarchy=self.hierarchy
+                hierarchy=self.hierarchy,
+                qdrant_url=self.config.get('qdrant', {}).get('host', 'http://localhost:6333'),
+                collection_name=self.config.get('qdrant', {}).get('collection_name', 'itsm_categories')
             )
             
             self.subcategory_classifier = SubcategoryClassifierAgent(
@@ -324,8 +380,11 @@ class ClassificationPipeline:
             except Exception as e:
                 self._update_agent_metrics('category_classifier', time.time() - category_start, success=False)
                 self.logger.error(f"Category classification failed: {e}")
-                # Set default category
-                ticket_state.predicted_category = "عام"
+                # Set default category in classification object
+                if not hasattr(ticket_state, 'classification') or ticket_state.classification is None:
+                    from ..models.ticket_state import TicketClassification
+                    ticket_state.classification = TicketClassification()
+                ticket_state.classification.main_category = "عام"
                 ticket_state.category_confidence = 0.1
                 ticket_state.metadata['category_classification_error'] = str(e)
             
@@ -342,8 +401,11 @@ class ClassificationPipeline:
             except Exception as e:
                 self._update_agent_metrics('subcategory_classifier', time.time() - subcategory_start, success=False)
                 self.logger.error(f"Subcategory classification failed: {e}")
-                # Set default subcategory
-                ticket_state.predicted_subcategory = "عام"
+                # Set default subcategory in classification object
+                if not hasattr(ticket_state, 'classification') or ticket_state.classification is None:
+                    from ..models.ticket_state import TicketClassification
+                    ticket_state.classification = TicketClassification()
+                ticket_state.classification.subcategory = "عام"
                 ticket_state.subcategory_confidence = 0.1
                 ticket_state.metadata['subcategory_classification_error'] = str(e)
             
@@ -360,9 +422,9 @@ class ClassificationPipeline:
             result = {
                 'ticket_id': ticket_id,
                 'classification': {
-                    'category': ticket_state.predicted_category,
+                    'category': ticket_state.classification.main_category if ticket_state.classification else None,
                     'category_confidence': ticket_state.category_confidence,
-                    'subcategory': ticket_state.predicted_subcategory,
+                    'subcategory': ticket_state.classification.subcategory if ticket_state.classification else None,
                     'subcategory_confidence': ticket_state.subcategory_confidence
                 },
                 'processing': {

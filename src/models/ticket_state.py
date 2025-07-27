@@ -82,9 +82,9 @@ class AgentProcessingInfo(BaseModel):
 
 class TicketClassification(BaseModel):
     """Classification results for the ticket"""
-    main_category: Optional[str] = Field(None, description="Primary category (SubCategory)")
+    main_category: Optional[str] = Field(None, description="Primary category (e.g., 'التسجيل', 'تسجيل الدخول')")
     main_category_description: Optional[str] = Field(None, description="Description of main category")
-    subcategory: Optional[str] = Field(None, description="Secondary category (SubCategory2)")
+    subcategory: Optional[str] = Field(None, description="Subcategory within the main category")
     subcategory_description: Optional[str] = Field(None, description="Description of subcategory")
     confidence_score: float = Field(0.0, ge=0.0, le=1.0, description="Overall classification confidence")
     alternative_classifications: List[Dict[str, Any]] = Field(default_factory=list, description="Alternative possible classifications")
@@ -131,14 +131,13 @@ class TicketState(BaseModel):
     # Arabic processing specific results
     arabic_processing: Dict[str, Any] = Field(default_factory=dict, description="Arabic processing results")
     
-    # Classification fields for direct access
-    predicted_category: Optional[str] = Field(None, description="Predicted main category")
+    # DEPRECATED: Classification fields for backward compatibility - use classification object instead
+    predicted_category: Optional[str] = Field(None, description="DEPRECATED: Use classification.main_category")
     category_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Category confidence score")
-    predicted_subcategory: Optional[str] = Field(None, description="Predicted subcategory")
     subcategory_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Subcategory confidence score")
     
-    # Classification results
-    classification: TicketClassification = Field(default_factory=TicketClassification)
+    # PRIMARY: Classification results (single source of truth)
+    classification: TicketClassification = Field(default_factory=TicketClassification, description="Primary classification results")
     
     # Processing information for each agent
     agent_processing: Dict[AgentType, AgentProcessingInfo] = Field(

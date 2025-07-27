@@ -67,25 +67,49 @@ class CategoryClassifierAgent(BaseAgent):
         
         self.hierarchy = hierarchy
         self.collection_name = collection_name
+        self.qdrant_url = qdrant_url
         
         # Initialize Qdrant client
         self.qdrant_client = QdrantClient(url=qdrant_url)
         
-        # Initialize OpenAI client for embeddings
-        self.openai_client = AsyncOpenAI()
+        # Initialize OpenAI client for embeddings - with API key validation
+        if not config.api_key:
+            raise ValueError("OpenAI API key is required for embeddings")
+        self.openai_client = AsyncOpenAI(api_key=config.api_key)
         
         # Classification parameters
         self.embedding_model = "text-embedding-3-small"
         self.top_k_candidates = 5
-        self.similarity_threshold = 0.7
+        self.similarity_threshold = 0.5
         
         # Few-shot examples cache
         self.few_shot_cache = {}
         
         self.logger.info(f"Category Classifier initialized with Qdrant at {qdrant_url}")
         
-        # Initialize vector collection if needed
-        asyncio.create_task(self._initialize_vector_collection())
+        # Flag to track initialization status
+        self._vector_collection_initialized = False
+    
+    @classmethod
+    async def create(cls, config: BaseAgentConfig, 
+                     hierarchy: Optional[ClassificationHierarchy] = None,
+                     qdrant_url: str = "http://localhost:6333",
+                     collection_name: str = "itsm_categories"):
+        """
+        Async factory method to properly initialize CategoryClassifierAgent.
+        
+        Args:
+            config: Agent configuration
+            hierarchy: Classification hierarchy
+            qdrant_url: Qdrant server URL
+            collection_name: Collection name for vectors
+            
+        Returns:
+            Fully initialized CategoryClassifierAgent
+        """
+        instance = cls(config, hierarchy, qdrant_url, collection_name)
+        await instance._initialize_vector_collection()
+        return instance
     
     async def _initialize_vector_collection(self):
         """Initialize Qdrant collection for category vectors"""
@@ -107,9 +131,12 @@ class CategoryClassifierAgent(BaseAgent):
                     await self._populate_vector_collection()
             else:
                 self.logger.info(f"Using existing Qdrant collection: {self.collection_name}")
+            
+            self._vector_collection_initialized = True
                 
         except Exception as e:
             self.logger.error(f"Failed to initialize Qdrant collection: {e}")
+            self._vector_collection_initialized = False
     
     async def _populate_vector_collection(self):
         """Populate Qdrant collection with category embeddings"""
@@ -216,12 +243,33 @@ class CategoryClassifierAgent(BaseAgent):
     async def _find_similar_categories(self, text: str) -> List[Dict[str, Any]]:
         """Find similar categories using vector search"""
         try:
+            # Check if Qdrant is properly initialized
+            if not self.qdrant_client:
+                self.logger.error("Qdrant client not initialized")
+                return self._fallback_keyword_search(text)
+            
+            # Check if vector collection is initialized
+            if not self._vector_collection_initialized:
+                self.logger.warning("Vector collection not initialized, attempting to initialize...")
+                await self._initialize_vector_collection()
+                if not self._vector_collection_initialized:
+                    return self._fallback_keyword_search(text)
+            
+            # Check collection exists
+            try:
+                collection_info = self.qdrant_client.get_collection(self.collection_name)
+            except Exception:
+                self.logger.warning("Collection not found, creating...")
+                await self._initialize_vector_collection()
+                if not self._vector_collection_initialized:
+                    return self._fallback_keyword_search(text)
+            
             # Get embedding for the input text
             query_embedding = await self._get_embedding(text)
             
             if not query_embedding:
                 self.logger.warning("Failed to get embedding for query text")
-                return []
+                return self._fallback_keyword_search(text)
             
             # Search in Qdrant
             search_results = self.qdrant_client.search(
@@ -264,7 +312,42 @@ class CategoryClassifierAgent(BaseAgent):
             
         except Exception as e:
             self.logger.error(f"Vector search failed: {e}")
+            return self._fallback_keyword_search(text)
+    
+    def _fallback_keyword_search(self, text: str) -> List[Dict[str, Any]]:
+        """Fallback keyword-based search when vector search fails"""
+        if not self.hierarchy:
             return []
+        
+        # Simple keyword matching as fallback
+        text_lower = text.lower()
+        matches = []
+        
+        for category_name, category in self.hierarchy.categories.items():
+            score = 0
+            
+            # Check category name
+            if category_name.lower() in text_lower:
+                score += 0.8
+            
+            # Check keywords
+            for keyword in category.keywords:
+                if keyword.lower() in text_lower:
+                    score += 0.3
+            
+            if score > 0:
+                matches.append({
+                    "name": category_name,
+                    "description": category.description,
+                    "similarity_score": min(score, 1.0),
+                    "subcategory_count": len(category.subcategories),
+                    "keywords": list(category.keywords),
+                    "search_method": "keyword_fallback"
+                })
+        
+        # Sort by score and return top candidates
+        matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return matches[:self.top_k_candidates]
     
     async def _classify_with_llm(self, text: str, similar_categories: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Classify using LLM with similar categories as context"""
@@ -391,33 +474,56 @@ class CategoryClassifierAgent(BaseAgent):
                                                similar_categories: List[Dict[str, Any]]):
         """Validate classification result and store in state"""
         
-        category = classification_result.get("category", "")
-        confidence = classification_result.get("confidence", 0.0)
+        category = classification_result.get("category", "").strip()
+        confidence = float(classification_result.get("confidence", 0.0))
         reasoning = classification_result.get("reasoning", "")
         
         # Validate category exists in hierarchy
-        if self.hierarchy and category not in self.hierarchy.categories:
+        valid_category = None
+        if self.hierarchy:
+            # Exact match first
+            if category in self.hierarchy.categories:
+                valid_category = category
+            else:
+                # Try to find close match by name similarity
+                category_lower = category.lower()
+                for cat_name in self.hierarchy.categories.keys():
+                    if cat_name.lower() == category_lower:
+                        valid_category = cat_name
+                        break
+                    elif category_lower in cat_name.lower() or cat_name.lower() in category_lower:
+                        valid_category = cat_name
+                        confidence *= 0.9  # Slight confidence reduction for fuzzy match
+                        break
+        
+        if not valid_category:
             self.logger.warning(f"Category '{category}' not found in hierarchy")
             
-            # Try to find a close match
+            # Fallback to most similar category
             if similar_categories:
-                category = similar_categories[0]["name"]
-                confidence *= 0.8  # Reduce confidence for fallback
-                reasoning += " (adjusted to valid category)"
+                valid_category = similar_categories[0]["name"]
+                confidence = min(confidence * 0.7, similar_categories[0]["similarity_score"])
+                reasoning += f" (fallback from '{category}' to valid category)"
+            else:
+                valid_category = "عام"  # Default category
+                confidence = 0.3
+                reasoning = f"Invalid category '{category}', using default"
         
-        # Store in ticket state
-        state.predicted_category = category
+        # Store for compatibility with pipeline metrics
         state.category_confidence = confidence
         
-        # Store in classification object
-        if not hasattr(state.classification, 'main_category'):
-            # Initialize classification attributes if they don't exist
-            state.classification.main_category = None
-            state.classification.main_category_description = None
-            state.classification.confidence_score = 0.0
+        # Ensure classification object has proper structure
+        if not hasattr(state, 'classification') or state.classification is None:
+            from ..models.ticket_state import TicketClassification
+            state.classification = TicketClassification()
         
-        state.classification.main_category = category
+        # Store in classification object (primary storage location)
+        state.classification.main_category = valid_category
         state.classification.confidence_score = confidence
+        
+        # Add category description if available
+        if self.hierarchy and valid_category in self.hierarchy.categories:
+            state.classification.main_category_description = self.hierarchy.categories[valid_category].description
         
         # Store classification metadata
         if not hasattr(state, 'classification_metadata'):
@@ -425,15 +531,18 @@ class CategoryClassifierAgent(BaseAgent):
         
         state.classification_metadata['category_agent'] = {
             'processing_timestamp': datetime.now().isoformat(),
+            'original_llm_category': category,
+            'final_category': valid_category,
             'similar_categories_found': len(similar_categories),
             'classification_method': classification_result.get("classification_method"),
-            'confidence_threshold_met': confidence >= self.config.confidence_threshold
+            'confidence_threshold_met': confidence >= self.config.confidence_threshold,
+            'reasoning': reasoning
         }
         
         # Set overall confidence flag
         state.classification_metadata['requires_review'] = confidence < self.config.confidence_threshold
         
-        self.logger.debug(f"Stored classification: {category} (confidence: {confidence:.2f})")
+        self.logger.info(f"Stored classification: {valid_category} (confidence: {confidence:.2f})")
     
     def _validate_output_state(self, state: TicketState) -> None:
         """Validate category classification results"""

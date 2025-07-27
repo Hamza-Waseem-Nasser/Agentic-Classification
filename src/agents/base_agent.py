@@ -104,24 +104,6 @@ class AgentMetrics(BaseModel):
         if self.total_processed == 0:
             return 0.0
         return (self.successful_processed / self.total_processed) * 100
-        self.total_processing_time += processing_time
-        self.average_processing_time = self.total_processing_time / self.total_requests
-        self.last_request_time = datetime.now()
-    
-    def update_failure(self, processing_time: float):
-        """Update metrics after a failed request"""
-        self.total_requests += 1
-        self.failed_requests += 1
-        self.total_processing_time += processing_time
-        self.average_processing_time = self.total_processing_time / self.total_requests
-        self.last_request_time = datetime.now()
-    
-    @property
-    def success_rate(self) -> float:
-        """Calculate success rate as a percentage"""
-        if self.total_requests == 0:
-            return 0.0
-        return (self.successful_requests / self.total_requests) * 100
 
 
 class BaseAgent(ABC):
@@ -153,6 +135,13 @@ class BaseAgent(ABC):
         self.config = config
         self.metrics = AgentMetrics()
         self.logger = self._setup_logging()
+        
+        # Validate OpenAI API key
+        if not self.config.api_key:
+            raise ValueError("OpenAI API key is required but not provided")
+        
+        if self.config.api_key == "your-api-key-here":
+            raise ValueError("Valid OpenAI API key required - please set a real API key")
         
         # Initialize the LLM - this is the core AI component
         self.llm = self._initialize_llm()

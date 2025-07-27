@@ -570,3 +570,52 @@ class StateManager:
         """Thread-safe increment of statistics counter"""
         with self._stats_lock:
             self.stats[stat_name] += 1
+    
+    def cleanup_old_locks(self, inactive_hours: int = 24) -> int:
+        """
+        Clean up locks for tickets that haven't been accessed recently.
+        
+        Args:
+            inactive_hours: Number of hours after which to consider a lock inactive
+            
+        Returns:
+            Number of locks cleaned up
+        """
+        from datetime import datetime, timedelta
+        
+        current_time = datetime.now()
+        cutoff_time = current_time - timedelta(hours=inactive_hours)
+        locks_cleaned = 0
+        
+        with self._global_lock:
+            locks_to_remove = []
+            
+            for ticket_id, lock in self._locks.items():
+                # Check if lock is not currently in use
+                if not lock.locked():
+                    # Check if state file exists and its modification time
+                    state_file = self._get_state_file_path(ticket_id)
+                    if not state_file.exists():
+                        # No state file, safe to remove lock
+                        locks_to_remove.append(ticket_id)
+                    else:
+                        # Check file modification time
+                        modification_time = datetime.fromtimestamp(state_file.stat().st_mtime)
+                        if modification_time < cutoff_time:
+                            locks_to_remove.append(ticket_id)
+            
+            for ticket_id in locks_to_remove:
+                del self._locks[ticket_id]
+                locks_cleaned += 1
+        
+        return locks_cleaned
+    
+    def get_lock_stats(self) -> Dict[str, Any]:
+        """Get statistics about current locks"""
+        with self._global_lock:
+            active_locks = sum(1 for lock in self._locks.values() if lock.locked())
+            return {
+                "total_locks": len(self._locks),
+                "active_locks": active_locks,
+                "inactive_locks": len(self._locks) - active_locks
+            }

@@ -197,24 +197,118 @@ class ClassificationHierarchy(BaseModel):
         self.total_categories = len(self.categories)
         self.total_subcategories = sum(len(cat.subcategories) for cat in self.categories.values())
     
+    @classmethod
+    def load_from_file(cls, file_path: str) -> 'ClassificationHierarchy':
+        """Load hierarchical classification structure from CSV file"""
+        import csv
+        from datetime import datetime
+        
+        hierarchy = cls()
+        hierarchy.source_file = file_path
+        hierarchy.loaded_at = datetime.now().isoformat()
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            print(f"Warning: Hierarchy file not found: {file_path}")
+            return hierarchy
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                csv_reader = csv.DictReader(file)
+                
+                categories_created = 0
+                subcategories_created = 0
+                current_category = None
+                current_category_name = None
+                
+                print(f"🔄 Loading hierarchical data from {file_path}...")
+                
+                for row_num, row in enumerate(csv_reader, 1):
+                    category_name = row.get('Category', '').strip()
+                    category_desc = row.get('Category_Description', '').strip()
+                    subcategory_name = row.get('SubCategory', '').strip()
+                    subcategory_desc = row.get('SubCategory_Description', '').strip()
+                    
+                    # If we have a category name, this is a new category definition
+                    if category_name:
+                        current_category_name = category_name
+                        
+                        # Create new category
+                        if category_name not in hierarchy.categories:
+                            current_category = Category(
+                                name=category_name,
+                                description=category_desc or f"Category: {category_name}",
+                                keywords=hierarchy._extract_keywords(category_name + " " + category_desc)
+                            )
+                            hierarchy.categories[category_name] = current_category
+                            categories_created += 1
+                            print(f"  📁 Created category: {category_name}")
+                        else:
+                            current_category = hierarchy.categories[category_name]
+                    
+                    # Add subcategory to the current category (if we have one)
+                    if subcategory_name and current_category and current_category_name:
+                        if subcategory_name not in current_category.subcategories:
+                            subcategory = Subcategory(
+                                name=subcategory_name,
+                                description=subcategory_desc or f"Subcategory: {subcategory_name}",
+                                parent_category=current_category_name,
+                                keywords=hierarchy._extract_keywords(subcategory_name + " " + subcategory_desc)
+                            )
+                            current_category.subcategories[subcategory_name] = subcategory
+                            subcategories_created += 1
+                            print(f"    ➕ Added subcategory: {subcategory_name}")
+                    
+                    # Skip rows with no meaningful data
+                    elif not category_name and not subcategory_name:
+                        continue
+            
+            # Update final counts
+            hierarchy._update_counts()
+            
+            print(f"✅ Hierarchical structure loaded successfully!")
+            print(f"📊 Summary: {categories_created} categories, {subcategories_created} subcategories")
+            print(f"🏗️ Total structure: {hierarchy.total_categories} categories, {hierarchy.total_subcategories} subcategories")
+            
+            # Show category breakdown
+            if hierarchy.total_categories > 0:
+                print(f"📋 Category breakdown:")
+                for cat_name, category in list(hierarchy.categories.items())[:5]:
+                    print(f"  • {cat_name}: {len(category.subcategories)} subcategories")
+                if hierarchy.total_categories > 5:
+                    print(f"  ... and {hierarchy.total_categories - 5} more categories")
+            
+        except Exception as e:
+            print(f"❌ Error loading hierarchical structure from {file_path}: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return hierarchy
+    
     def _extract_keywords(self, text: str) -> Set[str]:
-        """Extract keywords from text for matching purposes"""
+        """Extract keywords from text for matching purposes with proper Arabic handling"""
         if not text or text.strip() == "":
             return set()
         
-        # Simple keyword extraction - split by common separators
-        # For Arabic text, we might want more sophisticated processing
+        import re
+        
+        # Remove Arabic diacritics first
+        arabic_diacritics = re.compile(r'[\u064B-\u0652\u0670\u0640]')
+        text = arabic_diacritics.sub('', text)
+        
+        # Split on Arabic and English punctuation
+        words = re.findall(r'[\u0600-\u06FF]+|[a-zA-Z0-9]+', text)
+        
+        # Filter and normalize
         keywords = set()
-        separators = [' ', '،', '/', '-', '(', ')', '.', ':', ';']
-        
-        words = text
-        for sep in separators:
-            words = words.replace(sep, ' ')
-        
-        for word in words.split():
+        for word in words:
             word = word.strip()
-            if len(word) > 2:  # Ignore very short words
+            if len(word) > 2:  # Minimum length
                 keywords.add(word)
+                # Add normalized form if different (handle different Arabic alif forms)
+                normalized = word.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+                if normalized != word:
+                    keywords.add(normalized)
         
         return keywords
 

@@ -525,57 +525,66 @@ class SubcategoryClassifierAgent(BaseAgent):
                                             available_subcategories: List[Dict[str, Any]]):
         """Validate subcategory result and store in state"""
         
-        subcategory = subcategory_result.get("subcategory", "")
-        confidence = subcategory_result.get("confidence", 0.0)
+        subcategory = subcategory_result.get("subcategory", "").strip()
+        confidence = float(subcategory_result.get("confidence", 0.0))
         reasoning = subcategory_result.get("reasoning", "")
-        main_category = subcategory_result.get("parent_category", "")
         
         # Validate subcategory exists in available options
-        valid_subcategory_names = [sub["name"] for sub in available_subcategories]
-        
-        if subcategory not in valid_subcategory_names and available_subcategories:
-            self.logger.warning(f"Subcategory '{subcategory}' not in available options")
+        valid_subcategory = None
+        if available_subcategories:
+            # Exact match first
+            for sub in available_subcategories:
+                if sub["name"] == subcategory:
+                    valid_subcategory = subcategory
+                    break
             
-            # Try to find a close match
-            best_match = self._find_closest_subcategory_match(subcategory, available_subcategories)
-            if best_match:
-                subcategory = best_match["name"]
-                confidence *= 0.7  # Reduce confidence for fallback
-                reasoning += f" (adjusted to closest match: {best_match['name']})"
+            # Fuzzy match if no exact match
+            if not valid_subcategory:
+                subcategory_lower = subcategory.lower()
+                for sub in available_subcategories:
+                    if sub["name"].lower() == subcategory_lower:
+                        valid_subcategory = sub["name"]
+                        break
+                    elif subcategory_lower in sub["name"].lower() or sub["name"].lower() in subcategory_lower:
+                        valid_subcategory = sub["name"]
+                        confidence *= 0.9
+                        break
         
-        # Store in ticket state
-        state.predicted_subcategory = subcategory
+        if not valid_subcategory:
+            # Fallback to default or first available
+            if available_subcategories:
+                valid_subcategory = available_subcategories[0]["name"]
+                confidence *= 0.6
+                reasoning += f" (fallback from '{subcategory}')"
+            else:
+                valid_subcategory = self.default_subcategory
+                confidence = 0.3
+        
+        # Store in ticket state (remove duplication - use classification object as single source of truth)
+        # Keep for compatibility with pipeline metrics
         state.subcategory_confidence = confidence
         
-        # Store in classification object
-        if not hasattr(state.classification, 'subcategory'):
-            # Initialize subcategory attributes if they don't exist
-            state.classification.subcategory = None
-            state.classification.subcategory_description = None
+        # Ensure classification object exists
+        if not hasattr(state, 'classification') or state.classification is None:
+            from ..models.ticket_state import TicketClassification
+            state.classification = TicketClassification()
         
-        state.classification.subcategory = subcategory
-        state.classification.confidence_score = max(state.classification.confidence_score, confidence)
+        # Store in classification object (primary storage location)
+        state.classification.subcategory = valid_subcategory
         
-        # Store subcategory metadata
-        if not hasattr(state, 'classification_metadata'):
-            state.classification_metadata = {}
+        # Add subcategory description if available
+        for sub in available_subcategories:
+            if sub["name"] == valid_subcategory:
+                state.classification.subcategory_description = sub.get("description", "")
+                break
         
-        state.classification_metadata['subcategory_agent'] = {
-            'processing_timestamp': datetime.now().isoformat(),
-            'available_subcategories': len(available_subcategories),
-            'classification_method': subcategory_result.get("classification_method"),
-            'parent_category': main_category,
-            'confidence_threshold_met': confidence >= self.minimum_confidence
-        }
+        # Update overall confidence (weighted average)
+        category_conf = getattr(state, 'category_confidence', 0.5)
+        overall_confidence = (category_conf * 0.6 + confidence * 0.4)
+        state.classification.confidence_score = overall_confidence
         
-        # Update overall review requirement
-        if hasattr(state.classification_metadata, 'requires_review'):
-            state.classification_metadata['requires_review'] = (
-                state.classification_metadata.get('requires_review', False) or 
-                confidence < self.minimum_confidence
-            )
-        
-        self.logger.debug(f"Stored subcategory: {subcategory} (confidence: {confidence:.2f})")
+        self.logger.info(f"Stored subcategory: {valid_subcategory} (confidence: {confidence:.2f})")
+        self.logger.debug(f"Classification reasoning: {reasoning}")
     
     def _find_closest_subcategory_match(self, target: str, 
                                       available_subcategories: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
