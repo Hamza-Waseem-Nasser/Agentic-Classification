@@ -94,6 +94,10 @@ class SubcategoryClassifierAgent(BaseAgent):
         # Default subcategory for fallback
         self.default_subcategory = "عام"
         
+        # Add strict mode attributes (required for main.py integration)
+        self.strict_mode = False
+        self.classification_validator = None
+        
         self.logger.info("Subcategory Classifier initialized with hierarchical reasoning")
     
     def _load_category_configs(self) -> Dict[str, Dict[str, Any]]:
@@ -523,42 +527,78 @@ class SubcategoryClassifierAgent(BaseAgent):
     async def _validate_and_store_subcategory(self, state: TicketState, 
                                             subcategory_result: Dict[str, Any],
                                             available_subcategories: List[Dict[str, Any]]):
-        """Validate subcategory result and store in state"""
+        """Validate subcategory result and store in state - with strict mode support"""
         
         subcategory = subcategory_result.get("subcategory", "").strip()
         confidence = float(subcategory_result.get("confidence", 0.0))
         reasoning = subcategory_result.get("reasoning", "")
         
-        # Validate subcategory exists in available options
-        valid_subcategory = None
-        if available_subcategories:
-            # Exact match first
-            for sub in available_subcategories:
-                if sub["name"] == subcategory:
-                    valid_subcategory = subcategory
-                    break
-            
-            # Fuzzy match if no exact match
-            if not valid_subcategory:
-                subcategory_lower = subcategory.lower()
-                for sub in available_subcategories:
-                    if sub["name"].lower() == subcategory_lower:
-                        valid_subcategory = sub["name"]
-                        break
-                    elif subcategory_lower in sub["name"].lower() or sub["name"].lower() in subcategory_lower:
-                        valid_subcategory = sub["name"]
-                        confidence *= 0.9
-                        break
-        
-        if not valid_subcategory:
-            # Fallback to default or first available
-            if available_subcategories:
-                valid_subcategory = available_subcategories[0]["name"]
-                confidence *= 0.6
-                reasoning += f" (fallback from '{subcategory}')"
+        # STRICT MODE VALIDATION (if enabled)
+        if self.strict_mode and self.classification_validator:
+            main_category = getattr(state.classification, 'main_category', None)
+            if main_category:
+                is_valid, error_msg = self.classification_validator.validate_subcategory(
+                    main_category, subcategory
+                )
+                
+                if not is_valid:
+                    self.logger.warning(f"Strict subcategory validation failed: {error_msg}")
+                    # Get valid subcategories for this category
+                    valid_subcats = self.classification_validator.get_valid_subcategories_for_category(main_category)
+                    
+                    # Use first valid subcategory or default
+                    if valid_subcats and available_subcategories:
+                        # Find the best match from available subcategories
+                        for sub in available_subcategories:
+                            if sub["name"] in valid_subcats:
+                                valid_subcategory = sub["name"]
+                                confidence *= 0.7  # Reduce confidence for strict fallback
+                                reasoning = f"Strict validation failed for '{subcategory}', using valid option"
+                                break
+                        else:
+                            valid_subcategory = valid_subcats[0] if valid_subcats else self.default_subcategory
+                            confidence = 0.4
+                            reasoning = f"Strict fallback to first valid subcategory"
+                    else:
+                        valid_subcategory = self.default_subcategory
+                        confidence = 0.3
+                        reasoning = f"No valid subcategories found for category '{main_category}'"
+                else:
+                    valid_subcategory = subcategory  # Valid, use as-is
             else:
-                valid_subcategory = self.default_subcategory
-                confidence = 0.3
+                self.logger.warning("No main category found for subcategory validation")
+                valid_subcategory = subcategory
+        else:
+            # ORIGINAL VALIDATION LOGIC (for non-strict mode)
+            valid_subcategory = None
+            if available_subcategories:
+                # Exact match first
+                for sub in available_subcategories:
+                    if sub["name"] == subcategory:
+                        valid_subcategory = subcategory
+                        break
+                
+                # Fuzzy match if no exact match (only in non-strict mode)
+                if not valid_subcategory:
+                    subcategory_lower = subcategory.lower()
+                    for sub in available_subcategories:
+                        if sub["name"].lower() == subcategory_lower:
+                            valid_subcategory = sub["name"]
+                            break
+                        elif subcategory_lower in sub["name"].lower() or sub["name"].lower() in subcategory_lower:
+                            valid_subcategory = sub["name"]
+                            confidence *= 0.9
+                            break
+            
+            if not valid_subcategory:
+                # Fallback to default or first available
+                if available_subcategories:
+                    valid_subcategory = available_subcategories[0]["name"]
+                    confidence *= 0.6
+                    reasoning += f" (fallback from '{subcategory}')"
+                else:
+                    valid_subcategory = self.default_subcategory
+                    confidence = 0.3
         
         # Store in ticket state (remove duplication - use classification object as single source of truth)
         # Keep for compatibility with pipeline metrics

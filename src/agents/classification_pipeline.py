@@ -73,7 +73,8 @@ class ClassificationPipeline:
             hierarchy: Classification hierarchy (optional, will load if not provided)
             qdrant_client: Qdrant client for vector operations (optional)
         """
-        self.logger = logging.getLogger(__name__)
+        from src.utils.logging_config import get_logger
+        self.logger = get_logger(__name__)
         
         # Load configuration - use simple approach for now
         self.config = self._load_config(config_path)
@@ -104,6 +105,14 @@ class ClassificationPipeline:
             }
         }
         
+        # Add accuracy tracking
+        self.accuracy_stats = {
+            'total': 0,
+            'correct': 0,
+            'by_category': {},
+            'confidence_distribution': []
+        }
+        
         self.logger.info("Classification pipeline initialized successfully")
     
     @classmethod
@@ -128,8 +137,8 @@ class ClassificationPipeline:
     
     async def _async_initialize(self):
         """Complete async initialization of the pipeline"""
-        # Re-initialize category classifier with async factory
-        if hasattr(self, 'category_classifier'):
+        # Initialize category classifier with async factory (only if not already created)
+        if self.category_classifier is None:
             api_key = self.config.get('openai', {}).get('api_key')
             category_config = BaseAgentConfig(
                 agent_name="category_classifier",
@@ -292,12 +301,8 @@ class ClassificationPipeline:
             
             # Note: CategoryClassifierAgent will need async initialization
             # This will be handled in the async_initialize method
-            self.category_classifier = CategoryClassifierAgent(
-                config=category_config,
-                hierarchy=self.hierarchy,
-                qdrant_url=self.config.get('qdrant', {}).get('host', 'http://localhost:6333'),
-                collection_name=self.config.get('qdrant', {}).get('collection_name', 'itsm_categories')
-            )
+            # Don't create the instance here to avoid duplicates
+            self.category_classifier = None
             
             self.subcategory_classifier = SubcategoryClassifierAgent(
                 config=subcategory_config,
@@ -537,6 +542,25 @@ class ClassificationPipeline:
                 })
         
         return results
+    
+    def track_classification_accuracy(self, expected: str, predicted: str, confidence: float):
+        """Track classification accuracy for monitoring"""
+        self.accuracy_stats['total'] += 1
+        if expected == predicted:
+            self.accuracy_stats['correct'] += 1
+        
+        if expected not in self.accuracy_stats['by_category']:
+            self.accuracy_stats['by_category'][expected] = {'total': 0, 'correct': 0}
+        
+        self.accuracy_stats['by_category'][expected]['total'] += 1
+        if expected == predicted:
+            self.accuracy_stats['by_category'][expected]['correct'] += 1
+        
+        self.accuracy_stats['confidence_distribution'].append(confidence)
+        
+        # Log accuracy update
+        overall_accuracy = self.accuracy_stats['correct'] / self.accuracy_stats['total'] * 100
+        self.logger.debug(f"Classification accuracy updated: {overall_accuracy:.1f}%")
     
     def reset_metrics(self):
         """Reset all performance metrics."""

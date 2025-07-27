@@ -21,12 +21,14 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from src.agents.classification_pipeline import ClassificationPipeline
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Set up centralized logging
+from src.utils.logging_config import setup_logging, get_logger, disable_duplicate_handlers, prevent_logger_propagation_issues
+
+# Clean up any existing duplicate handlers and initialize logging only once
+disable_duplicate_handlers()
+setup_logging(level=logging.INFO)
+prevent_logger_propagation_issues()
+logger = get_logger(__name__)
 
 
 async def initialize_classification_system(csv_file_path: str = None, 
@@ -151,6 +153,9 @@ async def initialize_classification_system(csv_file_path: str = None,
             pipeline.category_classifier.strict_mode = strict_mode
             if strict_mode:
                 pipeline.category_classifier.classification_validator = classification_validator
+                # Add training examples to improve accuracy
+                logger.info("Adding category training examples...")
+                await pipeline.category_classifier.add_category_examples()
             
         if hasattr(pipeline, 'subcategory_classifier'):
             pipeline.subcategory_classifier.strict_mode = strict_mode

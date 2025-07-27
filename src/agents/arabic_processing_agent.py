@@ -61,6 +61,10 @@ class ArabicProcessingAgent(BaseAgent):
         self.dialect_markers = self._load_dialect_markers()
         self.normalization_rules = self._load_normalization_rules()
         
+        # Add system tag removal attributes (required for main.py integration)
+        self.remove_system_tags = True
+        self.system_tags_patterns = []  # Can be extended by pipeline
+        
         self.logger.info("Arabic Processing Agent initialized with enhanced language support")
     
     def _remove_system_tags(self, text: str) -> str:

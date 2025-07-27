@@ -11,9 +11,9 @@ import asyncio
 import logging
 from main import initialize_classification_system, classify_ticket
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Use centralized logging (main.py already sets it up)
+from src.utils.logging_config import get_logger
+logger = get_logger(__name__)
 
 async def test_strict_classification():
     """Test the strict classification fixes"""

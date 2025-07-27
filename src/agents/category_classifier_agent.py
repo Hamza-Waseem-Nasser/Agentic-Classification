@@ -85,6 +85,10 @@ class CategoryClassifierAgent(BaseAgent):
         # Few-shot examples cache
         self.few_shot_cache = {}
         
+        # Add strict mode attributes (required for main.py integration)
+        self.strict_mode = False
+        self.classification_validator = None
+        
         self.logger.info(f"Category Classifier initialized with Qdrant at {qdrant_url}")
         
         # Flag to track initialization status
@@ -444,24 +448,56 @@ class CategoryClassifierAgent(BaseAgent):
                                            valid_categories: List[str]) -> str:
         """Build classification prompt with strict category enforcement and better context"""
         
+        # Add decision tree guidance based on common patterns
+        classification_guidance = {
+            "التسجيل": [
+                "- إذا كان النص عن: إنشاء حساب جديد، التحقق من السجل التجاري، مشاكل بعد التسجيل",
+                "- كلمات مفتاحية: تسجيل، سجل تجاري، البيانات ظهر لي، الشركة مسجلة"
+            ],
+            "تسجيل الدخول": [
+                "- إذا كان النص عن: مشاكل الدخول للمنصة، كلمة المرور، نسيت كلمة المرور",
+                "- كلمات مفتاحية: دخول، لوجين، كلمة مرور، لا أستطيع الدخول"
+            ],
+            "بيانات المنشأة": [
+                "- إذا كان النص عن: تحديث بيانات الشركة، تغيير ضباط الاتصال، تعديل المعلومات",
+                "- كلمات مفتاحية: بيانات المنشأة، معلومات الشركة، ضابط اتصال"
+            ],
+            "الإرسالية": [
+                "- إذا كان النص عن: شهادات الإرسالية، حالة طلب الإرسالية، مشاكل إصدار الشهادة",
+                "- كلمات مفتاحية: إرسالية، شهادة إرسالية، حالة الطلب، لم تظهر الشهادة"
+            ],
+            "المدفوعات": [
+                "- إذا كان النص عن: دفع الفواتير، مشاكل السداد، الرسوم المالية",
+                "- كلمات مفتاحية: دفع، سداد، فاتورة، رسوم، مبلغ"
+            ]
+        }
+        
         prompt_parts = [
             "أنت خبير تصنيف تذاكر الدعم الفني لنظام سابر. صنف النص التالي إلى إحدى الفئات المحددة فقط:",
             f"النص: {text}",
             "",
-            "إرشادات التصنيف:",
-            "- 'التسجيل': مشاكل تسجيل حساب جديد أو التحقق من السجل التجاري بعد التسجيل",
-            "- 'تسجيل الدخول': مشاكل الدخول للمنصة وكلمات المرور",
-            "- 'بيانات المنشأة': تحديث وإدارة بيانات الشركة وضباط الاتصال",
-            "- 'الإرسالية': مشاكل شهادات الإرسالية وحالة الطلبات",
-            "- 'المدفوعات': مشاكل دفع الفواتير وإصدارها",
-            "- 'إضافة المنتجات': مشاكل إضافة منتجات جديدة للنظام",
-            "",
-            "الفئات المتاحة فقط (اختر واحدة بالضبط كما هي مكتوبة):"
+            "=== دليل التصنيف الدقيق ==="
         ]
         
-        # List all valid categories
+        # Add specific guidance for top categories
+        for category in valid_categories[:5]:  # Focus on top 5 most relevant
+            if category in classification_guidance:
+                prompt_parts.append(f"\n📁 {category}:")
+                prompt_parts.extend(classification_guidance[category])
+        
+        prompt_parts.extend([
+            "",
+            "=== قاعدة مهمة جداً ===",
+            "إذا ذكر النص 'سداد فاتورة' ولكن المشكلة تتعلق بخدمة معينة (مثل شهادة إرسالية)،",
+            "صنف حسب الخدمة المتأثرة وليس حسب الدفع. مثلاً:",
+            "- 'تم سداد فاتورة شهادة إرسالية ولم تظهر الشهادة' ← الإرسالية",
+            "- 'لا أستطيع دفع رسوم الشهادة' ← المدفوعات",
+            "",
+            "الفئات المتاحة فقط (اختر واحدة بالضبط كما هي مكتوبة):"
+        ])
+        
+        # List all valid categories with similarity scores
         for i, category in enumerate(valid_categories, 1):
-            # Check if this category is in similar categories for relevance info
             relevance = ""
             for sim_cat in similar_categories:
                 if sim_cat["name"] == category:
@@ -471,11 +507,7 @@ class CategoryClassifierAgent(BaseAgent):
         
         prompt_parts.extend([
             "",
-            "فكر في المشكلة الأساسية في النص:",
-            "- إذا كان النص يتحدث عن حالة طلب أو شهادة، ركز على نوع الشهادة (إرسالية، مطابقة، إلخ)",
-            "- إذا كان النص يتحدث عن دفع فاتورة ولكن المشكلة في الخدمة نفسها، صنف حسب الخدمة",
-            "- إذا كان النص عن تسجيل أو تحقق من بيانات الشركة، اختر 'التسجيل'",
-            "",
+            "تذكر: اختر فقط من الفئات المذكورة أعلاه بالضبط كما هي مكتوبة.",
             "أجب بصيغة JSON فقط:",
             '{"category": "اسم الفئة", "confidence": 0.95, "reasoning": "سبب الاختيار"}'
         ])
@@ -554,6 +586,11 @@ class CategoryClassifierAgent(BaseAgent):
         # Store for compatibility with pipeline metrics
         state.category_confidence = confidence
         
+        # Add classification correction logging
+        original_category = classification_result.get("category", "").strip()
+        if original_category != valid_category:
+            self.logger.warning(f"Category correction: '{original_category}' → '{valid_category}' (strict validation)")
+        
         # Ensure classification object has proper structure
         if not hasattr(state, 'classification') or state.classification is None:
             from ..models.ticket_state import TicketClassification
@@ -624,6 +661,71 @@ class CategoryClassifierAgent(BaseAgent):
             self.logger.error(f"Failed to get classification stats: {e}")
             return {'error': str(e)}
     
+    async def add_category_examples(self):
+        """Add common examples for each category to improve vector search"""
+        category_examples = {
+            "التسجيل": [
+                "بعد تسجيل دخول واستكمال البيانات ظهر لي ان الشركه مسجله",
+                "لا أستطيع إكمال عملية التسجيل",
+                "التحقق من السجل التجاري لا يعمل",
+                "ظهرت رسالة أن الشركة مسجلة مسبقاً"
+            ],
+            "تسجيل الدخول": [
+                "لا أستطيع تسجيل الدخول للمنصة",
+                "نسيت كلمة المرور",
+                "رسالة خطأ عند محاولة الدخول",
+                "الحساب مقفل ولا أستطيع الدخول"
+            ],
+            "الإرسالية": [
+                "تم سداد فاتورة شهادة ارسالية ولم تظهر الشهادة",
+                "حالة الطلب بانتظار السداد مع العلم بأن الفاتورة مسدده",
+                "لا تظهر شهادة الإرسالية بعد الدفع",
+                "مشكلة في إصدار شهادة الإرسالية"
+            ],
+            "المدفوعات": [
+                "لا أستطيع دفع الفاتورة",
+                "رسالة خطأ عند محاولة السداد",
+                "المبلغ المطلوب غير صحيح",
+                "لا تظهر طرق الدفع المتاحة"
+            ]
+        }
+        
+        points = []
+        # Get current max ID
+        try:
+            existing_points = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                limit=1,
+                with_payload=False
+            )[0]
+            point_id = len(existing_points) + 1
+        except:
+            point_id = 1000  # Start with a high ID to avoid conflicts
+        
+        for category, examples in category_examples.items():
+            for example in examples:
+                embedding = await self._get_embedding(example)
+                if embedding:
+                    point = PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload={
+                            "category_name": category,
+                            "type": "training_example",
+                            "example_text": example,
+                            "added_for": "accuracy_improvement"
+                        }
+                    )
+                    points.append(point)
+                    point_id += 1
+        
+        if points:
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
+            self.logger.info(f"Added {len(points)} training examples to improve accuracy")
+
     async def update_category_examples(self, category: str, positive_examples: List[str], 
                                      negative_examples: List[str] = None):
         """Update few-shot examples for a specific category"""

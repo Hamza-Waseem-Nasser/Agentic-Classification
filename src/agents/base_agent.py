@@ -155,17 +155,11 @@ class BaseAgent(ABC):
         Educational: Each agent gets its own logger with its name,
         making debugging much easier when you have multiple agents running.
         """
-        logger = logging.getLogger(f"agent.{self.config.agent_name}")
+        from src.utils.logging_config import get_logger
         
-        # Only add handler if it doesn't already exist (prevents duplicate logs)
-        if not logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-            logger.setLevel(logging.INFO)
+        # Use centralized logging configuration
+        # This prevents duplicate handlers and log messages
+        logger = get_logger(f"agent.{self.config.agent_name}")
         
         return logger
     

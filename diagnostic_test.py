@@ -1,5 +1,10 @@
-"""
-Diagnostic test to check if strict validation is working
+"""import asyncio
+import logging
+from main import initialize_classification_system, classify_ticket
+
+# Use centralized logging (main.py already sets it up)
+from src.utils.logging_config import get_logger
+logger = get_logger(__name__)stic test to check if strict validation is working
 """
 
 import asyncio

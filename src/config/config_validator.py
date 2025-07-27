@@ -37,6 +37,29 @@ class SystemConfig(BaseModel):
     allow_fuzzy_matching: bool = Field(default=False, description="Allow fuzzy category matching")
     remove_system_tags: bool = Field(default=True, description="Remove system-generated tags like AutoClosed")
     
+    # Add category-specific confidence thresholds
+    category_confidence_thresholds: Dict[str, float] = Field(
+        default={
+            "التسجيل": 0.75,
+            "تسجيل الدخول": 0.7,
+            "المدفوعات": 0.8,  # Higher for financial
+            "الإرسالية": 0.75,
+            "إضافة المنتجات": 0.7,
+            "default": 0.65
+        },
+        description="Category-specific confidence thresholds"
+    )
+    
+    # Add common misclassification mappings for logging
+    common_misclassifications: Dict[str, str] = Field(
+        default={
+            "تسجيل": "التسجيل",  # Missing 'ال'
+            "دخول": "تسجيل الدخول",  # Partial match
+            "المدفوع": "المدفوعات",  # Typo variant
+        },
+        description="Common misclassification patterns to watch for"
+    )
+    
     # List of system tags to remove
     system_tags_to_remove: List[str] = Field(
         default=[

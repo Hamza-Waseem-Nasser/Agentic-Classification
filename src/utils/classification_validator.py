@@ -5,7 +5,7 @@ This utility ensures that all classifications adhere strictly to the predefined 
 from the CSV file. It prevents fuzzy matching and similar name acceptance.
 """
 
-from typing import List, Tuple, Optional, Set, Dict
+from typing import List, Tuple, Optional, Set, Dict, Any
 from ..models.entities import ClassificationHierarchy
 
 
@@ -105,3 +105,26 @@ class ClassificationValidator:
         
         # No match found
         return None
+    
+    def get_valid_subcategories_for_category(self, category: str) -> List[str]:
+        """Get all valid subcategories for a given category"""
+        if category in self.category_subcategory_map:
+            return sorted(list(self.category_subcategory_map[category]))
+        return []
+
+    def get_validation_summary(self) -> Dict[str, Any]:
+        """Get a summary of the valid classifications"""
+        summary = {
+            'total_categories': len(self.valid_categories),
+            'total_subcategories': sum(len(subs) for subs in self.category_subcategory_map.values()),
+            'categories': {}
+        }
+        
+        for category in sorted(self.valid_categories):
+            subcats = self.category_subcategory_map.get(category, set())
+            summary['categories'][category] = {
+                'subcategory_count': len(subcats),
+                'subcategories': sorted(list(subcats))[:5]  # First 5 for preview
+            }
+        
+        return summary

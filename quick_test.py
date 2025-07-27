@@ -4,9 +4,11 @@ Quick test of improved classification
 """
 import asyncio
 import logging
-from main import initialize_classification_system
+from main import initialize_classification_system, classify_ticket
 
-# Set up logging
+# Use centralized logging (main.py already sets it up)
+from src.utils.logging_config import get_logger
+logger = get_logger(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

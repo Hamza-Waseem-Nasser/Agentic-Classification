@@ -9,8 +9,9 @@ from src.config.agent_config import BaseAgentConfig
 from src.data.category_loader import CategoryLoader
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.utils.logging_config import setup_logging, get_logger
+setup_logging(level=logging.INFO)  # Set up logging if not already done
+logger = get_logger(__name__)
 
 async def debug_vector_search():
     """Debug vector search for problematic test cases"""
