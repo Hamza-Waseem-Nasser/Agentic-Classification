@@ -30,13 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 async def initialize_classification_system(csv_file_path: str = None, 
-                                         config_path: str = None) -> 'ClassificationPipeline':
+                                         config_path: str = None,
+                                         strict_mode: bool = True) -> 'ClassificationPipeline':
     """
     Initialize the complete classification system with proper async handling.
     
     Args:
         csv_file_path: Path to the category CSV file
         config_path: Path to configuration file (optional)
+        strict_mode: Enable strict category matching (default: True)
         
     Returns:
         Fully initialized ClassificationPipeline
@@ -44,9 +46,11 @@ async def initialize_classification_system(csv_file_path: str = None,
     from src.config.config_validator import SystemConfig, ConfigValidator
     from src.data.category_loader import CategoryLoader
     from src.agents.classification_pipeline import ClassificationPipeline
+    from src.utils.classification_validator import ClassificationValidator
     from qdrant_client import QdrantClient
     
     logger.info("Starting ITSM Classification System initialization...")
+    logger.info(f"Strict mode: {'ENABLED' if strict_mode else 'DISABLED'}")
     
     # 1. Load and validate configuration
     logger.info("Loading configuration...")
@@ -56,12 +60,21 @@ async def initialize_classification_system(csv_file_path: str = None,
             import json
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
+            # Override with strict mode setting
+            config_data['strict_category_matching'] = strict_mode
+            config_data['allow_fuzzy_matching'] = not strict_mode
+            config_data['remove_system_tags'] = True
             config = SystemConfig(**config_data)
         else:
             # Load from environment variables and parameters
             config = SystemConfig.from_env(csv_file_path or "Category + SubCategory.csv")
+            config.strict_category_matching = strict_mode
+            config.allow_fuzzy_matching = not strict_mode
+            config.remove_system_tags = True
         
         logger.info("Configuration loaded successfully")
+        logger.info(f"Strict matching: {config.strict_category_matching}")
+        
     except Exception as e:
         logger.error(f"Configuration loading failed: {e}")
         raise
@@ -103,6 +116,15 @@ async def initialize_classification_system(csv_file_path: str = None,
         logger.info(f"Hierarchy loaded: {stats.categories_created} categories, "
                    f"{stats.subcategories_created} subcategories")
         
+        # Initialize classification validator for strict mode
+        if strict_mode:
+            classification_validator = ClassificationValidator(hierarchy)
+            logger.info("Strict classification validator initialized")
+            
+            # Log valid categories for debugging
+            valid_cats = list(hierarchy.categories.keys())
+            logger.info(f"Valid categories: {', '.join(valid_cats[:5])}{'...' if len(valid_cats) > 5 else ''}")
+        
         if stats.warnings:
             logger.warning(f"CSV loading had {len(stats.warnings)} warnings")
             for warning in stats.warnings[:5]:  # Show first 5 warnings
@@ -123,6 +145,28 @@ async def initialize_classification_system(csv_file_path: str = None,
         
         # Override with our validated configuration
         pipeline.config = config.to_agent_config_dict()
+        
+        # Set strict mode on all classifiers
+        if hasattr(pipeline, 'category_classifier'):
+            pipeline.category_classifier.strict_mode = strict_mode
+            if strict_mode:
+                pipeline.category_classifier.classification_validator = classification_validator
+            
+        if hasattr(pipeline, 'subcategory_classifier'):
+            pipeline.subcategory_classifier.strict_mode = strict_mode
+            if strict_mode:
+                pipeline.subcategory_classifier.classification_validator = classification_validator
+        
+        # Configure Arabic processor to remove system tags
+        if hasattr(pipeline, 'arabic_processor'):
+            pipeline.arabic_processor.remove_system_tags = config.remove_system_tags
+            pipeline.arabic_processor.system_tags_patterns = [
+                r'\(AutoClosed\)',
+                r'\(auto[_\-]?closed\)',
+                r'\[.*?closed.*?\]',
+                r'تم الإغلاق تلقائي[اً]?',
+                r'مغلق تلقائي[اً]?',
+            ]
         
         logger.info("Classification pipeline initialized successfully")
         

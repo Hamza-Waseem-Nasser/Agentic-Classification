@@ -355,17 +355,25 @@ class CategoryClassifierAgent(BaseAgent):
         if not self.llm:
             raise ValueError("LLM not available for classification")
         
-        # Build classification prompt
-        prompt = self._build_classification_prompt(text, similar_categories)
+        # Get exact category names from hierarchy
+        valid_categories = list(self.hierarchy.categories.keys()) if self.hierarchy else []
+        
+        # Build classification prompt with EXACT categories
+        prompt = self._build_strict_classification_prompt(text, similar_categories, valid_categories)
         
         try:
             from langchain_core.messages import HumanMessage, SystemMessage
             
-            system_message = SystemMessage(content="""
+            system_message = SystemMessage(content=f"""
             أنت خبير في تصنيف تذاكر الدعم التقني لأنظمة المعلومات.
-            قم بتصنيف النص المعطى إلى الفئة الرئيسية الأنسب.
-            أجب بصيغة JSON فقط مع الحقول التالية:
-            {"category": "اسم الفئة", "confidence": 0.95, "reasoning": "سبب الاختيار"}
+            
+            مهم جداً: يجب عليك اختيار فئة من القائمة المحددة فقط. لا تخترع فئات جديدة.
+            
+            الفئات المتاحة فقط هي:
+            {', '.join(valid_categories)}
+            
+            أجب بصيغة JSON بالضبط كما يلي:
+            {{"category": "اسم الفئة من القائمة", "confidence": 0.95, "reasoning": "سبب الاختيار"}}
             """)
             
             human_message = HumanMessage(content=prompt)
@@ -376,30 +384,48 @@ class CategoryClassifierAgent(BaseAgent):
             try:
                 result = json.loads(response.content)
                 
-                # Validate required fields
-                if "category" not in result:
-                    raise ValueError("Missing category in response")
-                
-                # Ensure confidence is a float
-                result["confidence"] = float(result.get("confidence", 0.5))
+                # STRICT validation - must be exact match
+                if result.get("category") not in valid_categories:
+                    # Find the most similar valid category from the similar_categories list
+                    if similar_categories and similar_categories[0]["name"] in valid_categories:
+                        result["category"] = similar_categories[0]["name"]
+                        result["confidence"] = similar_categories[0]["similarity_score"]
+                        result["reasoning"] = "Corrected to valid category from similarity search"
+                    else:
+                        # Default to first valid category if nothing matches
+                        result["category"] = valid_categories[0] if valid_categories else "غير محدد"
+                        result["confidence"] = 0.3
+                        result["reasoning"] = "No valid category match found"
                 
                 # Add metadata
-                result["classification_method"] = "llm_with_vector_context"
+                result["classification_method"] = "llm_with_vector_context_strict"
                 result["similar_categories_used"] = len(similar_categories)
                 
                 return result
                 
             except json.JSONDecodeError as e:
                 self.logger.warning(f"Failed to parse LLM response as JSON: {e}")
-                
-                # Fallback: extract category from text response
-                return self._extract_category_from_text(response, similar_categories)
+                # Fallback to highest similarity category
+                if similar_categories and similar_categories[0]["name"] in valid_categories:
+                    return {
+                        "category": similar_categories[0]["name"],
+                        "confidence": similar_categories[0]["similarity_score"],
+                        "reasoning": "Fallback to highest similarity match",
+                        "classification_method": "vector_similarity_fallback"
+                    }
+                else:
+                    return {
+                        "category": valid_categories[0] if valid_categories else "غير محدد",
+                        "confidence": 0.1,
+                        "reasoning": "Fallback to first valid category",
+                        "classification_method": "fallback_unknown"
+                    }
                 
         except Exception as e:
             self.logger.error(f"LLM classification failed: {e}")
             
             # Fallback to highest similarity category
-            if similar_categories:
+            if similar_categories and similar_categories[0]["name"] in valid_categories:
                 return {
                     "category": similar_categories[0]["name"],
                     "confidence": similar_categories[0]["similarity_score"],
@@ -408,35 +434,58 @@ class CategoryClassifierAgent(BaseAgent):
                 }
             else:
                 return {
-                    "category": "غير محدد",
+                    "category": valid_categories[0] if valid_categories else "غير محدد",
                     "confidence": 0.1,
                     "reasoning": "No similar categories found",
                     "classification_method": "fallback_unknown"
                 }
     
-    def _build_classification_prompt(self, text: str, similar_categories: List[Dict[str, Any]]) -> str:
-        """Build classification prompt with context"""
+    def _build_strict_classification_prompt(self, text: str, similar_categories: List[Dict[str, Any]], 
+                                           valid_categories: List[str]) -> str:
+        """Build classification prompt with strict category enforcement and better context"""
         
         prompt_parts = [
-            "قم بتصنيف النص التالي إلى الفئة الرئيسية الأنسب:",
+            "أنت خبير تصنيف تذاكر الدعم الفني لنظام سابر. صنف النص التالي إلى إحدى الفئات المحددة فقط:",
             f"النص: {text}",
             "",
-            "الفئات المحتملة (مرتبة حسب التشابه):"
+            "إرشادات التصنيف:",
+            "- 'التسجيل': مشاكل تسجيل حساب جديد أو التحقق من السجل التجاري بعد التسجيل",
+            "- 'تسجيل الدخول': مشاكل الدخول للمنصة وكلمات المرور",
+            "- 'بيانات المنشأة': تحديث وإدارة بيانات الشركة وضباط الاتصال",
+            "- 'الإرسالية': مشاكل شهادات الإرسالية وحالة الطلبات",
+            "- 'المدفوعات': مشاكل دفع الفواتير وإصدارها",
+            "- 'إضافة المنتجات': مشاكل إضافة منتجات جديدة للنظام",
+            "",
+            "الفئات المتاحة فقط (اختر واحدة بالضبط كما هي مكتوبة):"
         ]
         
-        for i, category in enumerate(similar_categories, 1):
-            prompt_parts.append(
-                f"{i}. {category['name']}: {category['description']} "
-                f"(تشابه: {category['similarity_score']:.2f})"
-            )
+        # List all valid categories
+        for i, category in enumerate(valid_categories, 1):
+            # Check if this category is in similar categories for relevance info
+            relevance = ""
+            for sim_cat in similar_categories:
+                if sim_cat["name"] == category:
+                    relevance = f" (تشابه: {sim_cat['similarity_score']:.2f})"
+                    break
+            prompt_parts.append(f"{i}. {category}{relevance}")
         
         prompt_parts.extend([
             "",
-            "اختر الفئة الأنسب وأعط درجة الثقة (0-1) مع تبرير الاختيار.",
-            "أجب بصيغة JSON فقط:"
+            "فكر في المشكلة الأساسية في النص:",
+            "- إذا كان النص يتحدث عن حالة طلب أو شهادة، ركز على نوع الشهادة (إرسالية، مطابقة، إلخ)",
+            "- إذا كان النص يتحدث عن دفع فاتورة ولكن المشكلة في الخدمة نفسها، صنف حسب الخدمة",
+            "- إذا كان النص عن تسجيل أو تحقق من بيانات الشركة، اختر 'التسجيل'",
+            "",
+            "أجب بصيغة JSON فقط:",
+            '{"category": "اسم الفئة", "confidence": 0.95, "reasoning": "سبب الاختيار"}'
         ])
         
         return "\n".join(prompt_parts)
+    
+    def _build_classification_prompt(self, text: str, similar_categories: List[Dict[str, Any]]) -> str:
+        """Build classification prompt with context - DEPRECATED, use _build_strict_classification_prompt"""
+        return self._build_strict_classification_prompt(text, similar_categories, 
+                                                       list(self.hierarchy.categories.keys()) if self.hierarchy else [])
     
     def _extract_category_from_text(self, response: str, similar_categories: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Extract category from text response as fallback"""
@@ -472,42 +521,35 @@ class CategoryClassifierAgent(BaseAgent):
     async def _validate_and_store_classification(self, state: TicketState, 
                                                classification_result: Dict[str, Any],
                                                similar_categories: List[Dict[str, Any]]):
-        """Validate classification result and store in state"""
+        """Validate classification result and store in state - STRICT VERSION"""
         
         category = classification_result.get("category", "").strip()
         confidence = float(classification_result.get("confidence", 0.0))
         reasoning = classification_result.get("reasoning", "")
         
-        # Validate category exists in hierarchy
+        # STRICT validation - must exist exactly in hierarchy
         valid_category = None
-        if self.hierarchy:
-            # Exact match first
-            if category in self.hierarchy.categories:
-                valid_category = category
-            else:
-                # Try to find close match by name similarity
-                category_lower = category.lower()
-                for cat_name in self.hierarchy.categories.keys():
-                    if cat_name.lower() == category_lower:
-                        valid_category = cat_name
-                        break
-                    elif category_lower in cat_name.lower() or cat_name.lower() in category_lower:
-                        valid_category = cat_name
-                        confidence *= 0.9  # Slight confidence reduction for fuzzy match
-                        break
-        
-        if not valid_category:
-            self.logger.warning(f"Category '{category}' not found in hierarchy")
+        if self.hierarchy and category in self.hierarchy.categories:
+            valid_category = category
+        else:
+            self.logger.warning(f"Category '{category}' not found in hierarchy - using fallback")
             
-            # Fallback to most similar category
+            # Use the top similar category if it's valid
             if similar_categories:
-                valid_category = similar_categories[0]["name"]
-                confidence = min(confidence * 0.7, similar_categories[0]["similarity_score"])
-                reasoning += f" (fallback from '{category}' to valid category)"
-            else:
-                valid_category = "عام"  # Default category
-                confidence = 0.3
-                reasoning = f"Invalid category '{category}', using default"
+                for sim_cat in similar_categories:
+                    if sim_cat["name"] in self.hierarchy.categories:
+                        valid_category = sim_cat["name"]
+                        confidence = min(confidence * 0.7, sim_cat["similarity_score"])
+                        reasoning += f" (strict fallback from '{category}' to valid category)"
+                        break
+            
+            # Last resort - use a default valid category
+            if not valid_category and self.hierarchy:
+                valid_categories = list(self.hierarchy.categories.keys())
+                if valid_categories:
+                    valid_category = valid_categories[0]  # Use first valid category
+                    confidence = 0.3
+                    reasoning = f"Invalid category '{category}', using default"
         
         # Store for compatibility with pipeline metrics
         state.category_confidence = confidence

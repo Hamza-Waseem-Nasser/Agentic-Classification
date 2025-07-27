@@ -32,6 +32,24 @@ class SystemConfig(BaseModel):
     confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Minimum confidence threshold")
     embedding_model: str = Field(default="text-embedding-3-small", description="Embedding model for vector search")
     
+    # Add strict matching configuration
+    strict_category_matching: bool = Field(default=True, description="Enforce exact category name matching")
+    allow_fuzzy_matching: bool = Field(default=False, description="Allow fuzzy category matching")
+    remove_system_tags: bool = Field(default=True, description="Remove system-generated tags like AutoClosed")
+    
+    # List of system tags to remove
+    system_tags_to_remove: List[str] = Field(
+        default=[
+            "(AutoClosed)",
+            "(auto-closed)", 
+            "[closed]",
+            "(Closed)",
+            "تم الإغلاق تلقائيا",
+            "مغلق تلقائيا"
+        ],
+        description="System tags to remove during processing"
+    )
+    
     @validator('openai_api_key')
     def validate_api_key(cls, v):
         if not v or v in ["your-api-key-here", "sk-placeholder"]:
@@ -67,7 +85,10 @@ class SystemConfig(BaseModel):
             qdrant_collection=os.getenv('QDRANT_COLLECTION', 'itsm_categories'),
             csv_file_path=csv_file_path or os.getenv('CSV_FILE_PATH', 'Category + SubCategory.csv'),
             confidence_threshold=float(os.getenv('CONFIDENCE_THRESHOLD', '0.7')),
-            embedding_model=os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
+            embedding_model=os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small'),
+            strict_category_matching=os.getenv('STRICT_CATEGORY_MATCHING', 'true').lower() == 'true',
+            allow_fuzzy_matching=os.getenv('ALLOW_FUZZY_MATCHING', 'false').lower() == 'true',
+            remove_system_tags=os.getenv('REMOVE_SYSTEM_TAGS', 'true').lower() == 'true'
         )
     
     def to_agent_config_dict(self) -> Dict[str, Any]:
@@ -87,7 +108,11 @@ class SystemConfig(BaseModel):
             'classification': {
                 'csv_file_path': self.csv_file_path,
                 'confidence_threshold': self.confidence_threshold,
-                'embedding_model': self.embedding_model
+                'embedding_model': self.embedding_model,
+                'strict_category_matching': self.strict_category_matching,
+                'allow_fuzzy_matching': self.allow_fuzzy_matching,
+                'remove_system_tags': self.remove_system_tags,
+                'system_tags_to_remove': self.system_tags_to_remove
             }
         }
 

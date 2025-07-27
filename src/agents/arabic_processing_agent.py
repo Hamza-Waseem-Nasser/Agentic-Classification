@@ -63,6 +63,28 @@ class ArabicProcessingAgent(BaseAgent):
         
         self.logger.info("Arabic Processing Agent initialized with enhanced language support")
     
+    def _remove_system_tags(self, text: str) -> str:
+        """Remove system-generated tags and metadata"""
+        # Remove common system tags
+        system_patterns = [
+            r'\(AutoClosed\)',
+            r'\(auto[_\-]?closed\)',
+            r'\[.*?closed.*?\]',
+            r'تم الإغلاق تلقائي[اً]?',
+            r'مغلق تلقائي[اً]?',
+            r'\(.*?[Cc]losed.*?\)',
+            r'\[.*?[Cc]losed.*?\]',
+        ]
+        
+        cleaned = text
+        for pattern in system_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove extra whitespace left by removals
+        cleaned = ' '.join(cleaned.split())
+        
+        return cleaned
+    
     def _load_default_glossary(self) -> Dict[str, str]:
         """Load default technical terms and their normalized forms"""
         return {
@@ -298,6 +320,9 @@ class ArabicProcessingAgent(BaseAgent):
     async def _normalize_arabic_text(self, text: str) -> str:
         """Normalize Arabic text using rules and LLM assistance"""
         
+        # FIRST: Remove system-generated tags
+        text = self._remove_system_tags(text)
+        
         normalized = text
         
         # 1. Remove diacritics
@@ -315,26 +340,30 @@ class ArabicProcessingAgent(BaseAgent):
         # 4. Clean up whitespace
         normalized = ' '.join(normalized.split())
         
-        # 5. LLM-assisted normalization for complex cases
+        # 5. LLM-assisted normalization with STRICT instructions
         if self.llm and len(text) > 50:
             try:
-                normalization_prompt = """
-                قم بتطبيع النص العربي التالي:
-                - إزالة الأخطاء الإملائية
-                - توحيد المصطلحات التقنية
-                - تحويل العامية إلى الفصحى عند الضرورة
-                - الحفاظ على المعنى الأصلي
+                normalization_prompt = f"""
+                قم بتنظيف وتوحيد النص التالي للمعالجة الآلية:
                 
-                النص الأصلي: {text}
+                القواعد المهمة:
+                1. أزل العبارات العاطفية والشخصية
+                2. حول إلى صيغة محايدة ومباشرة
+                3. أزل التكرار والحشو
+                4. احتفظ بالمعلومات التقنية المهمة فقط
+                5. لا تضف أي معلومات جديدة
+                6. اكتب النص النظيف فقط بدون شرح
                 
-                النص المطبع:""".format(text=text)
+                النص الأصلي: {normalized}
+                
+                النص النظيف:"""
                 
                 from langchain_core.messages import HumanMessage
                 response = await self._safe_llm_call([HumanMessage(content=normalization_prompt)])
                 llm_normalized = response.content.strip()
                 
-                # Use LLM result if it's significantly different and seems better
-                if len(llm_normalized) > 0 and abs(len(llm_normalized) - len(normalized)) < len(text) * 0.3:
+                # Use LLM result if it's reasonable
+                if len(llm_normalized) > 0 and len(llm_normalized) < len(text) * 1.5:
                     normalized = llm_normalized
                     self.logger.debug("Applied LLM-assisted normalization")
                     
@@ -391,30 +420,51 @@ class ArabicProcessingAgent(BaseAgent):
                     'start_pos': text.find(number)
                 })
         
-        # 2. LLM-based entity extraction for more complex entities
+        # 2. LLM-based entity extraction with better JSON handling
         if self.llm and len(text) > 20:
             try:
-                entity_prompt = (
-                    "استخرج الكيانات المهمة من النص التالي واعطها تصنيف: "
-                    "أسماء الأشخاص، أسماء الشركات، أسماء المنتجات، المواقع الجغرافية، "
-                    "المصطلحات التقنية، أسماء الأنظمة أو التطبيقات. "
-                    f"النص: {text} "
-                    'أجب بصيغة JSON فقط: [{"text": "النص", "type": "النوع", "confidence": 0.9}]'
-                )
+                entity_prompt = f"""استخرج الكيانات المهمة من النص التالي.
+
+النص: {text}
+
+أنواع الكيانات المطلوبة:
+- أسماء الأشخاص
+- أسماء الشركات  
+- أسماء المنتجات أو الأنظمة
+- أرقام مرجعية
+- مصطلحات تقنية
+
+الإجابة يجب أن تكون JSON array فقط، مثال:
+[{{"text": "كلمة", "type": "نوع", "confidence": 0.9}}]
+
+إذا لم تجد كيانات، أرجع: []
+
+JSON:"""
                 
                 from langchain_core.messages import HumanMessage
                 response = await self._safe_llm_call([HumanMessage(content=entity_prompt)])
                 
-                try:
-                    llm_entities = json.loads(response.content)
-                    if isinstance(llm_entities, list):
-                        for entity in llm_entities:
-                            if isinstance(entity, dict) and 'text' in entity and 'type' in entity:
-                                entity['start_pos'] = text.find(entity['text'])
-                                entities.append(entity)
-                        self.logger.debug(f"LLM extracted {len(llm_entities)} additional entities")
-                except json.JSONDecodeError:
-                    self.logger.warning("Failed to parse LLM entity extraction response")
+                # Clean response to ensure valid JSON
+                json_str = response.content.strip()
+                
+                # Try to extract JSON array from response
+                if '[' in json_str and ']' in json_str:
+                    start = json_str.find('[')
+                    end = json_str.rfind(']') + 1
+                    json_str = json_str[start:end]
+                    
+                    try:
+                        llm_entities = json.loads(json_str)
+                        if isinstance(llm_entities, list):
+                            for entity in llm_entities:
+                                if isinstance(entity, dict) and 'text' in entity and 'type' in entity:
+                                    entity['start_pos'] = text.find(entity['text'])
+                                    entities.append(entity)
+                            self.logger.debug(f"LLM extracted {len(llm_entities)} entities")
+                    except json.JSONDecodeError:
+                        self.logger.warning("Failed to parse cleaned JSON response")
+                else:
+                    self.logger.warning("No JSON array found in LLM response")
                     
             except Exception as e:
                 self.logger.warning(f"LLM entity extraction failed: {e}")
@@ -470,34 +520,49 @@ class ArabicProcessingAgent(BaseAgent):
                     'confidence': 0.85
                 })
         
-        # 3. LLM-based technical term identification
+        # 3. LLM-based technical term identification with better JSON handling
         if self.llm and len(text) > 30:
             try:
-                tech_prompt = (
-                    "حدد المصطلحات التقنية المتعلقة بأنظمة المعلومات في النص التالي: "
-                    "مصطلحات البرمجة، أسماء الأنظمة والتطبيقات، مصطلحات الشبكات، "
-                    "مصطلحات قواعد البيانات، مصطلحات الأمان. "
-                    f"النص: {text} "
-                    'أجب بصيغة JSON فقط: [{"term": "المصطلح", "category": "فئة المصطلح", "confidence": 0.9}]'
-                )
+                tech_prompt = f"""حدد المصطلحات التقنية في النص التالي.
+
+النص: {text}
+
+ابحث عن:
+- مصطلحات البرمجة والحاسوب
+- أسماء الأنظمة والتطبيقات
+- مصطلحات الشبكات وقواعد البيانات
+
+أجب بـ JSON array فقط:
+[{{"term": "المصطلح", "category": "الفئة", "confidence": 0.9}}]
+
+إذا لم تجد مصطلحات، أرجع: []
+
+JSON:"""
                 
                 from langchain_core.messages import HumanMessage
                 response = await self._safe_llm_call([HumanMessage(content=tech_prompt)])
                 
-                try:
-                    llm_terms = json.loads(response.content)
-                    if isinstance(llm_terms, list):
-                        for term_data in llm_terms:
-                            if isinstance(term_data, dict) and 'term' in term_data:
-                                technical_terms.append({
-                                    'term': term_data['term'],
-                                    'category': term_data.get('category', 'llm_detected'),
-                                    'confidence': term_data.get('confidence', 0.80)
-                                })
-                        self.logger.debug(f"LLM identified {len(llm_terms)} technical terms")
-                except json.JSONDecodeError:
-                    self.logger.warning("Failed to parse LLM technical terms response")
+                # Extract and clean JSON
+                json_str = response.content.strip()
+                if '[' in json_str and ']' in json_str:
+                    start = json_str.find('[')
+                    end = json_str.rfind(']') + 1
+                    json_str = json_str[start:end]
                     
+                    try:
+                        llm_terms = json.loads(json_str)
+                        if isinstance(llm_terms, list):
+                            for term_data in llm_terms:
+                                if isinstance(term_data, dict) and 'term' in term_data:
+                                    technical_terms.append({
+                                        'term': term_data['term'],
+                                        'category': term_data.get('category', 'llm_detected'),
+                                        'confidence': term_data.get('confidence', 0.80)
+                                    })
+                            self.logger.debug(f"LLM identified {len(llm_terms)} technical terms")
+                    except json.JSONDecodeError:
+                        self.logger.warning("Failed to parse technical terms JSON")
+                        
             except Exception as e:
                 self.logger.warning(f"LLM technical term identification failed: {e}")
         
