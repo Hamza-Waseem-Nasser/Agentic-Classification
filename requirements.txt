@@ -7,6 +7,10 @@ langgraph>=0.1.0
 # Environment Management
 python-dotenv>=1.0.0
 
+
+#monitoring and Logging
+langsmith
+
 # Data Handling
 pydantic>=2.0.0
 
