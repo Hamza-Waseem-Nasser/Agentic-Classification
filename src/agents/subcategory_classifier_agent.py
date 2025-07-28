@@ -83,10 +83,10 @@ class SubcategoryClassifierAgent(BaseAgent):
         # Initialize OpenAI client for embeddings
         self.openai_client = AsyncOpenAI()
         
-        # Classification parameters
-        self.embedding_model = "text-embedding-3-small"
-        self.top_k_subcategories = 3
-        self.minimum_confidence = 0.6
+        # Classification parameters - get from config
+        self.embedding_model = getattr(config, 'embedding_model', "text-embedding-3-small")
+        self.top_k_subcategories = getattr(config, 'top_k_subcategories', 3)
+        self.minimum_confidence = getattr(config, 'minimum_confidence', 0.6)
         
         # Category-specific configurations
         self.category_configs = self._load_category_configs()

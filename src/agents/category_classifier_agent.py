@@ -77,10 +77,10 @@ class CategoryClassifierAgent(BaseAgent):
             raise ValueError("OpenAI API key is required for embeddings")
         self.openai_client = AsyncOpenAI(api_key=config.api_key)
         
-        # Classification parameters
-        self.embedding_model = "text-embedding-3-small"
-        self.top_k_candidates = 5
-        self.similarity_threshold = 0.5
+        # Classification parameters - get from config
+        self.embedding_model = getattr(config, 'embedding_model', "text-embedding-3-small")
+        self.top_k_candidates = getattr(config, 'top_k_candidates', 5)
+        self.similarity_threshold = getattr(config, 'similarity_threshold', 0.5)
         
         # Few-shot examples cache
         self.few_shot_cache = {}
@@ -376,8 +376,13 @@ class CategoryClassifierAgent(BaseAgent):
             الفئات المتاحة فقط هي:
             {', '.join(valid_categories)}
             
+            استخدم Chain-of-Thought reasoning:
+            1. أولاً، اقرأ النص وحدد الكلمات المفتاحية
+            2. ثانياً، قارن مع الفئات المتاحة
+            3. ثالثاً، اختر الفئة الأنسب بناءً على التحليل
+            
             أجب بصيغة JSON بالضبط كما يلي:
-            {{"category": "اسم الفئة من القائمة", "confidence": 0.95, "reasoning": "سبب الاختيار"}}
+            {{"category": "اسم الفئة من القائمة", "confidence": 0.95, "reasoning": "سبب الاختيار مع خطوات التفكير", "chain_of_thought": "أولاً: ... ثانياً: ... ثالثاً: ..."}}
             """)
             
             human_message = HumanMessage(content=prompt)

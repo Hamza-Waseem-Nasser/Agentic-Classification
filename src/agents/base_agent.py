@@ -321,7 +321,7 @@ class BaseAgent(ABC):
             "average_processing_time": self.metrics.average_processing_time,
             "last_request_time": self.metrics.last_request_time.isoformat() if self.metrics.last_request_time else None
         }
-    
+     
     def __repr__(self) -> str:
         """
         String representation of the agent for debugging.
