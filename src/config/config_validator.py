@@ -16,7 +16,7 @@ class SystemConfig(BaseModel):
     
     # OpenAI Configuration
     openai_api_key: str = Field(..., description="OpenAI API key for LLM operations")
-    openai_model: str = Field(default="gpt-4", description="OpenAI model to use")
+    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model to use")
     openai_temperature: float = Field(default=0.1, ge=0.0, le=2.0, description="LLM temperature")
     openai_max_tokens: int = Field(default=1000, gt=0, description="Maximum tokens per request")
     openai_organization_id: Optional[str] = Field(None, description="OpenAI organization ID")

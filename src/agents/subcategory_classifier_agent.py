@@ -107,24 +107,48 @@ class SubcategoryClassifierAgent(BaseAgent):
             "تسجيل الدخول": {
                 "confidence_threshold": 0.7,
                 "keywords_weight": 0.3,
-                "common_keywords": ["دخول", "تسجيل", "كلمة مرور", "حساب"],
+                "common_keywords": ["دخول", "تسجيل", "كلمة مرور", "حساب", "استعادة", "رمز التحقق"],
                 "fallback_subcategory": "عدم القدرة على تسجيل الدخول"
             },
             
-            # Payments and Financial
+            # Payments and Financial - ENHANCED FOR BETTER DETECTION
             "المدفوعات": {
-                "confidence_threshold": 0.8,  # Higher threshold for financial
-                "keywords_weight": 0.4,
-                "common_keywords": ["دفع", "فاتورة", "مبلغ", "بنك"],
-                "fallback_subcategory": "مشاكل في عملية الدفع"
+                "confidence_threshold": 0.75,  # Lowered slightly for better detection
+                "keywords_weight": 0.45,      # Increased weight for payment keywords
+                "common_keywords": ["سداد", "دفع", "فاتورة", "مبلغ", "بنك", "انعكاس", "خصم", "لم ينعكس", "انتظار السداد"],
+                "fallback_subcategory": "بعد سداد الفاتورة لا تنعكس حالة الطلب"
             },
             
-            # Registration and Setup
+            # Registration and Setup - ENHANCED FOR REGISTRATION DETECTION
             "التسجيل": {
+                "confidence_threshold": 0.65,  # Lowered to catch more registration cases
+                "keywords_weight": 0.4,       # Increased for better keyword matching
+                "common_keywords": ["تسجيل", "إنشاء", "حساب", "مستخدم", "سجل تجاري", "تاريخ الانتهاء", "غير صحيح", "مسجلة", "استكمال البيانات", "ظهر"],
+                "fallback_subcategory": "التحقق من السجل التجاري"
+            },
+            
+            # Company Data - NEW CATEGORY FOR EMAIL AND DATA ISSUES
+            "بيانات المنشأة": {
                 "confidence_threshold": 0.7,
+                "keywords_weight": 0.35,
+                "common_keywords": ["بيانات", "ايميل", "مفوض", "ضابط اتصال", "تحديث", "إشعار", "لم يصل"],
+                "fallback_subcategory": "تحديث بيانات المنشأة"
+            },
+            
+            # Shipment Certificates - NEW CATEGORY
+            "الإرسالية": {
+                "confidence_threshold": 0.75,
                 "keywords_weight": 0.3,
-                "common_keywords": ["تسجيل", "إنشاء", "حساب", "مستخدم"],
-                "fallback_subcategory": "مشاكل في التسجيل"
+                "common_keywords": ["ارسالية", "شهادة", "موديلات", "منتجات", "فواتير"],
+                "fallback_subcategory": "حالة الطلب في النظام"
+            },
+            
+            # Textile Category - NEW ENHANCED CATEGORY
+            "فئة النسيج": {
+                "confidence_threshold": 0.8,
+                "keywords_weight": 0.5,       # High weight for specific keywords
+                "common_keywords": ["نسيج", "النسيح", "فئة", "CA-"],
+                "fallback_subcategory": "تقديم الطلب"
             },
             
             # Products and Inventory
@@ -425,14 +449,50 @@ class SubcategoryClassifierAgent(BaseAgent):
     def _build_subcategory_prompt(self, text: str, main_category: str, 
                                 relevant_subcategories: List[Dict[str, Any]], 
                                 category_config: Dict[str, Any]) -> str:
-        """Build hierarchical subcategory classification prompt"""
+        """Build hierarchical subcategory classification prompt with enhanced context"""
         
         prompt_parts = [
             f"قم بتصنيف النص التالي إلى فئة فرعية ضمن الفئة الرئيسية '{main_category}':",
             f"النص: {text}",
             "",
-            "الفئات الفرعية المتاحة (مرتبة حسب الصلة):"
+            "=== دليل التصنيف المحسن ===",
         ]
+        
+        # Add category-specific guidance
+        category_guidance = {
+            "المدفوعات": [
+                "🔥 تركز على: مشاكل الدفع والسداد",
+                "- 'تم سداد ولم ينعكس' → بعد سداد الفاتورة لا تنعكس حالة الطلب",
+                "- 'لا أستطيع دفع' → سداد الفاتورة",
+                "- 'مشكلة في إصدار فاتورة' → إصدار الفاتورة"
+            ],
+            "التسجيل": [
+                "🔥 تركز على: عملية التسجيل الأولى",
+                "- 'تاريخ الانتهاء غير صحيح' → التحقق من السجل التجاري",
+                "- 'إنشاء حساب جديد' → التحقق من السجل التجاري",
+                "- 'بعد تسجيل دخول واستكمال البيانات ظهر ان الشركة مسجلة' → التحقق من السجل التجاري",
+                "- 'رمز التحقق للجوال' → رمز التحقق للجوال",
+                "- أي مشكلة في التحقق من صحة بيانات السجل التجاري أثناء التسجيل → التحقق من السجل التجاري"
+            ],
+            "بيانات المنشأة": [
+                "🔥 تركز على: تحديث وإدارة البيانات",
+                "- 'مشاكل الإيميل' → ايميل مفوض المنشأة",
+                "- 'ضابط اتصال' → إضافة ضابط اتصال",
+                "- 'تحديث البيانات' → تحديث بيانات المنشأة"
+            ],
+            "الإرسالية": [
+                "🔥 تركز على: شهادات الإرسالية والمنتجات",
+                "- 'إضافة موديلات' → إضافة الموديلات",
+                "- 'حالة الطلب' → حالة الطلب في النظام",
+                "- 'بيانات الشهادة' → بيانات الشهادة"
+            ]
+        }
+        
+        if main_category in category_guidance:
+            prompt_parts.extend(category_guidance[main_category])
+            prompt_parts.append("")
+        
+        prompt_parts.append("الفئات الفرعية المتاحة (مرتبة حسب الصلة):")
         
         for i, subcategory in enumerate(relevant_subcategories, 1):
             similarity_info = ""
@@ -464,7 +524,8 @@ class SubcategoryClassifierAgent(BaseAgent):
         
         prompt_parts.extend([
             "اختر الفئة الفرعية الأكثر دقة وتخصصاً مع درجة الثقة ومبرر الاختيار.",
-            "أجب بصيغة JSON فقط:"
+            "أجب بصيغة JSON فقط:",
+            '{"subcategory": "اسم الفئة الفرعية", "confidence": 0.85, "reasoning": "سبب الاختيار"}'
         ])
         
         return "\n".join(prompt_parts)

@@ -231,7 +231,7 @@ def create_sample_config_file(file_path: str = "config.json"):
     """Create a sample configuration file"""
     sample_config = {
         "openai_api_key": "sk-your-api-key-here",
-        "openai_model": "gpt-4",
+        "openai_model": "gpt-4o-mini",
         "openai_temperature": 0.1,
         "openai_max_tokens": 1000,
         "qdrant_url": "http://localhost:6333",

@@ -162,7 +162,7 @@ class ClassificationPipeline:
         default_config = {
             'openai': {
                 'api_key': os.getenv('OPENAI_API_KEY'),
-                'model': 'gpt-4',
+                'model': 'gpt-4o-mini',
                 'temperature': 0.1,
                 'max_tokens': 1000
             },

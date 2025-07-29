@@ -1,0 +1,57 @@
+ITSM CLASSIFICATION ACCURACY TEST SUMMARY
+==================================================
+
+Test Date: 2025-07-29 16:41:20
+Test File: Correct User Descrioptions.csv
+Total Cases: 10
+
+ACCURACY METRICS:
+--------------------
+
+BASIC_METRICS:
+  total_test_cases: 10
+  successful_classifications: 10
+  failed_classifications: 0
+  success_rate: 100.0%
+
+ACCURACY_SCORES:
+  category_accuracy: 90.0%
+  subcategory_accuracy: 90.0%
+  overall_accuracy: 90.0%
+  category_correct_count: 9/10
+  subcategory_correct_count: 9/10
+  overall_correct_count: 9/10
+
+CONFIDENCE_METRICS:
+  average_category_confidence: 0.940
+  average_subcategory_confidence: 0.870
+  average_overall_confidence: 0.905
+  high_confidence_cases: 10
+  medium_confidence_cases: 0
+  low_confidence_cases: 0
+
+PERFORMANCE_METRICS:
+  average_processing_time: 39.92s
+  fastest_classification: 23.59s
+  slowest_classification: 89.46s
+  total_test_time: 399.15s
+
+
+IMPROVEMENT SUGGESTIONS:
+-------------------------
+
+1. Specific Category Confusion (Priority: Medium)
+   Issue: "التسجيل" often confused with "بيانات المنشأة" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "التسجيل" and "بيانات المنشأة"
+   - Enhance description clarity for "التسجيل" category
+   - Review and improve keywords for "التسجيل"
+   - Add negative examples in prompts to avoid confusion
+
+2. High Confidence Errors (Priority: Critical)
+   Issue: 1 cases incorrectly classified with high confidence
+   Suggestions:
+   - Review these specific cases for systematic bias in training data
+   - Add these misclassified examples as negative examples
+   - Improve prompt engineering to reduce overconfidence
+   - Consider additional validation steps for high-confidence predictions

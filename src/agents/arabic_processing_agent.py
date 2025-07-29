@@ -116,7 +116,17 @@ class ArabicProcessingAgent(BaseAgent):
             "داونلود": "تحميل",
             "ابلود": "رفع",
             "سيف": "حفظ",
-            "ديليت": "حذف"
+            "ديليت": "حذف",
+            
+            # Context-specific terms for better classification
+            "مسجله": "مسجلة",
+            "واستكمال": "وإكمال",
+            "يضهر": "يظهر",
+            "اضافة": "إضافة",
+            "تجربه": "تجربة",
+            "مشكله": "مشكلة",
+            "خلل": "خطأ",
+            "اشكاليه": "مشكلة"
         }
     
     def _initialize_arabic_patterns(self) -> Dict[str, re.Pattern]:

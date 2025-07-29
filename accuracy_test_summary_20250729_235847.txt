@@ -1,0 +1,193 @@
+ITSM CLASSIFICATION ACCURACY TEST SUMMARY
+==================================================
+
+Test Date: 2025-07-29 23:58:47
+Test File: Correct User Descrioptions.csv
+Total Cases: 249
+
+ACCURACY METRICS:
+--------------------
+
+BASIC_METRICS:
+  total_test_cases: 249
+  successful_classifications: 249
+  failed_classifications: 0
+  success_rate: 100.0%
+
+ACCURACY_SCORES:
+  category_accuracy: 47.0%
+  subcategory_accuracy: 30.5%
+  overall_accuracy: 28.9%
+  category_correct_count: 117/249
+  subcategory_correct_count: 76/249
+  overall_correct_count: 72/249
+
+CONFIDENCE_METRICS:
+  average_category_confidence: 0.502
+  average_subcategory_confidence: 0.858
+  average_overall_confidence: 0.680
+  high_confidence_cases: 45
+  medium_confidence_cases: 128
+  low_confidence_cases: 76
+
+PERFORMANCE_METRICS:
+  average_processing_time: 6.45s
+  fastest_classification: 2.55s
+  slowest_classification: 20.18s
+  total_test_time: 1606.57s
+
+
+IMPROVEMENT SUGGESTIONS:
+-------------------------
+
+1. Category Classification (Priority: High)
+   Issue: Category accuracy is 47.0%, below 80% threshold
+   Suggestions:
+   - Add more diverse training examples for category embeddings
+   - Enhance category descriptions with more detailed keywords
+   - Improve chain-of-thought prompts for category classification
+   - Consider adjusting similarity thresholds in vector search
+
+2. Subcategory Classification (Priority: High)
+   Issue: Subcategory accuracy is 30.5%, below 75% threshold
+   Suggestions:
+   - Add more subcategory-specific training examples
+   - Enhance hierarchical context in subcategory prompts
+   - Review subcategory descriptions for clarity
+   - Consider parent category context in subcategory classification
+
+3. Confidence Scores (Priority: Medium)
+   Issue: Average confidence is 0.680, below 0.7 threshold
+   Suggestions:
+   - Improve embedding quality with more representative examples
+   - Enhance LLM prompts with clearer instructions
+   - Add confidence calibration based on historical performance
+   - Consider ensemble methods for more reliable predictions
+
+4. Specific Category Confusion (Priority: Medium)
+   Issue: "بيانات المنشأة" often confused with "التسجيل" (4 times)
+   Suggestions:
+   - Add distinguishing examples between "بيانات المنشأة" and "التسجيل"
+   - Enhance description clarity for "بيانات المنشأة" category
+   - Review and improve keywords for "بيانات المنشأة"
+   - Add negative examples in prompts to avoid confusion
+
+5. Specific Category Confusion (Priority: Medium)
+   Issue: "تسجيل الدخول" often confused with "التسجيل" (10 times)
+   Suggestions:
+   - Add distinguishing examples between "تسجيل الدخول" and "التسجيل"
+   - Enhance description clarity for "تسجيل الدخول" category
+   - Review and improve keywords for "تسجيل الدخول"
+   - Add negative examples in prompts to avoid confusion
+
+6. Specific Category Confusion (Priority: Medium)
+   Issue: "جهات المطابقة" often confused with "مطابقة منتج COC" (3 times)
+   Suggestions:
+   - Add distinguishing examples between "جهات المطابقة" and "مطابقة منتج COC"
+   - Enhance description clarity for "جهات المطابقة" category
+   - Review and improve keywords for "جهات المطابقة"
+   - Add negative examples in prompts to avoid confusion
+
+7. Specific Category Confusion (Priority: Medium)
+   Issue: "الإرسالية" often confused with "التسجيل" (9 times)
+   Suggestions:
+   - Add distinguishing examples between "الإرسالية" and "التسجيل"
+   - Enhance description clarity for "الإرسالية" category
+   - Review and improve keywords for "الإرسالية"
+   - Add negative examples in prompts to avoid confusion
+
+8. Specific Category Confusion (Priority: Medium)
+   Issue: "أخرى" often confused with "التسجيل" (3 times)
+   Suggestions:
+   - Add distinguishing examples between "أخرى" and "التسجيل"
+   - Enhance description clarity for "أخرى" category
+   - Review and improve keywords for "أخرى"
+   - Add negative examples in prompts to avoid confusion
+
+9. Specific Category Confusion (Priority: Medium)
+   Issue: "مطابقة منتج COC" often confused with "التسجيل" (2 times)
+   Suggestions:
+   - Add distinguishing examples between "مطابقة منتج COC" and "التسجيل"
+   - Enhance description clarity for "مطابقة منتج COC" category
+   - Review and improve keywords for "مطابقة منتج COC"
+   - Add negative examples in prompts to avoid confusion
+
+10. Specific Category Confusion (Priority: Medium)
+   Issue: "الشهادات الصادرة من الهيئة" often confused with "الإرسالية" (3 times)
+   Suggestions:
+   - Add distinguishing examples between "الشهادات الصادرة من الهيئة" and "الإرسالية"
+   - Enhance description clarity for "الشهادات الصادرة من الهيئة" category
+   - Review and improve keywords for "الشهادات الصادرة من الهيئة"
+   - Add negative examples in prompts to avoid confusion
+
+11. Specific Category Confusion (Priority: Medium)
+   Issue: "المدفوعات" often confused with "الإرسالية" (41 times)
+   Suggestions:
+   - Add distinguishing examples between "المدفوعات" and "الإرسالية"
+   - Enhance description clarity for "المدفوعات" category
+   - Review and improve keywords for "المدفوعات"
+   - Add negative examples in prompts to avoid confusion
+
+12. Specific Category Confusion (Priority: Medium)
+   Issue: "فئة النسيج" often confused with "التسجيل" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "فئة النسيج" and "التسجيل"
+   - Enhance description clarity for "فئة النسيج" category
+   - Review and improve keywords for "فئة النسيج"
+   - Add negative examples in prompts to avoid confusion
+
+13. Specific Category Confusion (Priority: Medium)
+   Issue: "فسح" often confused with "التسجيل" (3 times)
+   Suggestions:
+   - Add distinguishing examples between "فسح" and "التسجيل"
+   - Enhance description clarity for "فسح" category
+   - Review and improve keywords for "فسح"
+   - Add negative examples in prompts to avoid confusion
+
+14. Specific Category Confusion (Priority: Medium)
+   Issue: "عدم القدرة على تسجيل الدخول" often confused with "التسجيل" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "عدم القدرة على تسجيل الدخول" and "التسجيل"
+   - Enhance description clarity for "عدم القدرة على تسجيل الدخول" category
+   - Review and improve keywords for "عدم القدرة على تسجيل الدخول"
+   - Add negative examples in prompts to avoid confusion
+
+15. Specific Category Confusion (Priority: Medium)
+   Issue: "إضافة المنتجات" often confused with "التسجيل" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "إضافة المنتجات" and "التسجيل"
+   - Enhance description clarity for "إضافة المنتجات" category
+   - Review and improve keywords for "إضافة المنتجات"
+   - Add negative examples in prompts to avoid confusion
+
+16. Specific Category Confusion (Priority: Medium)
+   Issue: "طلبات المصانع الموثوقة" often confused with "التسجيل" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "طلبات المصانع الموثوقة" and "التسجيل"
+   - Enhance description clarity for "طلبات المصانع الموثوقة" category
+   - Review and improve keywords for "طلبات المصانع الموثوقة"
+   - Add negative examples in prompts to avoid confusion
+
+17. Specific Category Confusion (Priority: Medium)
+   Issue: "nan" often confused with "التسجيل" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "nan" and "التسجيل"
+   - Enhance description clarity for "nan" category
+   - Review and improve keywords for "nan"
+   - Add negative examples in prompts to avoid confusion
+
+18. Specific Category Confusion (Priority: Medium)
+   Issue: "فئة غيار السيارات" often confused with "مطابقة منتج COC" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "فئة غيار السيارات" and "مطابقة منتج COC"
+   - Enhance description clarity for "فئة غيار السيارات" category
+   - Review and improve keywords for "فئة غيار السيارات"
+   - Add negative examples in prompts to avoid confusion
+
+19. High Confidence Errors (Priority: Critical)
+   Issue: 21 cases incorrectly classified with high confidence
+   Suggestions:
+   - Review these specific cases for systematic bias in training data
+   - Add these misclassified examples as negative examples
+   - Improve prompt engineering to reduce overconfidence
+   - Consider additional validation steps for high-confidence predictions
