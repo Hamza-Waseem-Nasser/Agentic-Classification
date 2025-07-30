@@ -48,6 +48,8 @@ from .subcategory_classifier_agent import SubcategoryClassifierAgent
 from .base_agent import BaseAgentConfig, AgentException
 from ..models.ticket_state import TicketState
 from ..models.entities import ClassificationHierarchy, Category, Subcategory
+from ..config.config_manager import ConfigurationManager
+from ..config.llm_factory import LLMFactory
 from ..state.state_manager import StateManager
 import json
 import os
@@ -76,8 +78,9 @@ class ClassificationPipeline:
         from src.utils.logging_config import get_logger
         self.logger = get_logger(__name__)
         
-        # Load configuration - use simple approach for now
-        self.config = self._load_config(config_path)
+        # Use configuration manager instead of manual config loading
+        self.config_manager = ConfigurationManager(config_path)
+        self.config = self.config_manager.raw_config  # Keep for backward compatibility
         
         # Load classification hierarchy
         self.hierarchy = hierarchy or self._load_hierarchy()
@@ -136,66 +139,28 @@ class ClassificationPipeline:
         return instance
     
     async def _async_initialize(self):
-        """Complete async initialization of the pipeline"""
+        """Complete async initialization of the pipeline using configuration manager"""
         # Initialize category classifier with async factory (only if not already created)
         if self.category_classifier is None:
-            api_key = self.config.get('openai', {}).get('api_key')
-            category_config = BaseAgentConfig(
-                agent_name="category_classifier",
-                model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
-                temperature=self.config.get('openai', {}).get('temperature', 0.1),
-                max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
-                api_key=api_key
-            )
+            # Get configuration from configuration manager
+            category_config = self.config_manager.get_agent_config("category_classifier")
+            qdrant_config = self.config_manager.get_qdrant_config()
             
             self.category_classifier = await CategoryClassifierAgent.create(
                 config=category_config,
                 hierarchy=self.hierarchy,
-                qdrant_url=self.config.get('qdrant', {}).get('host', 'http://localhost:6333'),
-                collection_name=self.config.get('qdrant', {}).get('collection_name', 'itsm_categories')
+                qdrant_url=qdrant_config.get('url', 'http://localhost:6333'),
+                collection_name=qdrant_config.get('collection_name', 'itsm_categories')
             )
             
-            self.logger.info("Async initialization completed for category classifier")
-    
-    def _load_config(self, config_path: Optional[str] = None) -> Dict[str, Any]:
-        """Load configuration from file or use defaults."""
-        default_config = {
-            'openai': {
-                'api_key': os.getenv('OPENAI_API_KEY'),
-                'model': 'gpt-4o-mini',
-                'temperature': 0.1,
-                'max_tokens': 1000
-            },
-            'classification': {
-                'hierarchy_path': 'data/classification_hierarchy.json',
-                'confidence_threshold': 0.7
-            },
-            'qdrant': {
-                'host': 'localhost',
-                'port': 6333,
-                'collection_name': 'itsm_categories'
-            }
-        }
-        
-        if config_path and os.path.exists(config_path):
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                # Merge with defaults
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                return config
-            except Exception as e:
-                self.logger.warning(f"Could not load config from {config_path}: {e}")
-        
-        return default_config
+            self.logger.info("Async initialization completed for category classifier using configuration manager")
     
     def _load_hierarchy(self) -> ClassificationHierarchy:
         """Load classification hierarchy from configuration."""
         try:
-            # Load from configuration file or default CSV location
-            hierarchy_path = self.config.get('classification', {}).get('hierarchy_path', 'Category + Subcategory.csv')
+            # Load from configuration manager
+            data_config = self.config_manager.get_data_config()
+            hierarchy_path = data_config.get('csv_file_path', 'Category + SubCategory.csv')
             self.logger.info(f"Loading hierarchy from: {hierarchy_path}")
             return ClassificationHierarchy.load_from_file(hierarchy_path)
         except Exception as e:
@@ -251,47 +216,17 @@ class ClassificationPipeline:
         return ClassificationHierarchy(categories=categories)
     
     def _initialize_agents(self, qdrant_client=None):
-        """Initialize all agents with proper configuration."""
-        # Get OpenAI API key from config
-        api_key = self.config.get('openai', {}).get('api_key')
-        if not api_key:
-            raise ValueError("OpenAI API key is required in configuration")
-        
-        # Create base configs for each agent
-        orchestrator_config = BaseAgentConfig(
-            agent_name="orchestrator",
-            model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
-            temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
-            api_key=api_key
-        )
-        
-        arabic_config = BaseAgentConfig(
-            agent_name="arabic_processor",
-            model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
-            temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
-            api_key=api_key
-        )
-        
-        category_config = BaseAgentConfig(
-            agent_name="category_classifier",
-            model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
-            temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
-            api_key=api_key
-        )
-        
-        subcategory_config = BaseAgentConfig(
-            agent_name="subcategory_classifier",
-            model_name=self.config.get('openai', {}).get('model', 'gpt-4'),
-            temperature=self.config.get('openai', {}).get('temperature', 0.1),
-            max_tokens=self.config.get('openai', {}).get('max_tokens', 1000),
-            api_key=api_key
-        )
-        
-        # Initialize agents
+        """Initialize all agents using configuration manager."""
         try:
+            # Get agent configurations from configuration manager
+            orchestrator_config = self.config_manager.get_agent_config("orchestrator")
+            arabic_config = self.config_manager.get_agent_config("arabic_processor")
+            category_config = self.config_manager.get_agent_config("category_classifier")
+            subcategory_config = self.config_manager.get_agent_config("subcategory_classifier")
+            
+            self.logger.info("Retrieved agent configurations from configuration manager")
+            
+            # Initialize agents with standardized configurations
             self.orchestrator = OrchestratorAgent(
                 config=orchestrator_config,
                 state_manager=self.state_manager
@@ -309,7 +244,7 @@ class ClassificationPipeline:
                 hierarchy=self.hierarchy
             )
             
-            self.logger.info("All agents initialized successfully")
+            self.logger.info("All agents initialized successfully with configuration manager")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize agents: {e}")

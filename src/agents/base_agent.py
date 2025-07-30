@@ -49,6 +49,7 @@ from pydantic import BaseModel
 
 # Local imports
 from ..config.agent_config import BaseAgentConfig
+from ..config.llm_factory import LLMFactory
 
 
 class AgentType(str, Enum):
@@ -165,30 +166,23 @@ class BaseAgent(ABC):
     
     def _initialize_llm(self) -> ChatOpenAI:
         """
-        Initialize the Language Model using LangChain's ChatOpenAI wrapper.
+        Initialize the Language Model using the centralized LLM factory.
         
         Returns:
             ChatOpenAI instance configured with agent settings
             
-        Educational: We use LangChain's ChatOpenAI instead of raw OpenAI client
-        because it provides better integration with LangGraph and other tools.
+        Educational: We use the LLMFactory for consistent LLM creation
+        across all agents, ensuring proper configuration and error handling.
         """
         try:
-            llm = ChatOpenAI(
-                model=self.config.model_name,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                api_key=self.config.api_key,
-                organization=self.config.organization_id,
-                timeout=self.config.timeout_seconds,
-                max_retries=self.config.retry_attempts
-            )
+            # Use the centralized factory for LLM creation
+            llm = LLMFactory.create_chat_llm(self.config)
             
-            self.logger.info(f"Initialized LLM: {self.config.model_name}")
+            self.logger.info(f"Initialized LLM via factory: {self.config.model_name}")
             return llm
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize LLM: {e}")
+            self.logger.error(f"Failed to initialize LLM via factory: {e}")
             raise
     
     @abstractmethod

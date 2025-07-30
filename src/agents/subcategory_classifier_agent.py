@@ -58,6 +58,7 @@ except ImportError:
     AsyncOpenAI = None
 
 from .base_agent import BaseAgent, BaseAgentConfig, AgentType
+from ..config.llm_factory import LLMFactory
 from ..models.ticket_state import TicketState
 from ..models.entities import Category, Subcategory, ClassificationHierarchy
 
@@ -80,8 +81,8 @@ class SubcategoryClassifierAgent(BaseAgent):
         self.qdrant_client = qdrant_client
         self.collection_name = collection_name
         
-        # Initialize OpenAI client for embeddings
-        self.openai_client = AsyncOpenAI()
+        # Initialize OpenAI client for embeddings using factory
+        self.openai_client = LLMFactory.create_async_openai(config)
         
         # Classification parameters - get from config
         self.embedding_model = getattr(config, 'embedding_model', "text-embedding-3-small")

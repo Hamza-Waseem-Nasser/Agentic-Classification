@@ -254,11 +254,15 @@ class ConfigValidator:
         
         # Check CSV
         try:
-            from ..data.category_loader import CategoryLoader
-            loader = CategoryLoader()
-            validation = loader.validate_csv_file(config.csv_file_path)
-            health_status["csv_loaded"] = validation["is_valid"]
-            health_status["details"]["csv"] = f"Valid: {validation['is_valid']}, Rows: {validation.get('row_count', 0)}"
+            from ..models.entities import ClassificationHierarchy
+            import pandas as pd
+            
+            # Basic CSV validation
+            df = pd.read_csv(config.csv_file_path)
+            hierarchy = ClassificationHierarchy.from_csv(config.csv_file_path)
+            
+            health_status["csv_loaded"] = True
+            health_status["details"]["csv"] = f"Valid: True, Categories: {len(hierarchy.categories)}, Rows: {len(df)}"
         except Exception as e:
             health_status["details"]["csv"] = f"Failed: {str(e)}"
         

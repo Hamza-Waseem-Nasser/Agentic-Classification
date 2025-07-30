@@ -1,0 +1,73 @@
+ITSM CLASSIFICATION ACCURACY TEST SUMMARY
+==================================================
+
+Test Date: 2025-07-30 15:12:33
+Test File: Correct User Descrioptions.csv
+Total Cases: 3
+
+ACCURACY METRICS:
+--------------------
+
+BASIC_METRICS:
+  total_test_cases: 3
+  successful_classifications: 3
+  failed_classifications: 0
+  success_rate: 100.0%
+
+ACCURACY_SCORES:
+  category_accuracy: 66.7%
+  subcategory_accuracy: 66.7%
+  overall_accuracy: 66.7%
+  category_correct_count: 2/3
+  subcategory_correct_count: 2/3
+  overall_correct_count: 2/3
+
+CONFIDENCE_METRICS:
+  average_category_confidence: 0.770
+  average_subcategory_confidence: 0.095
+  average_overall_confidence: 0.432
+  high_confidence_cases: 0
+  medium_confidence_cases: 0
+  low_confidence_cases: 3
+
+PERFORMANCE_METRICS:
+  average_processing_time: 7.96s
+  fastest_classification: 6.58s
+  slowest_classification: 10.33s
+  total_test_time: 23.89s
+
+
+IMPROVEMENT SUGGESTIONS:
+-------------------------
+
+1. Category Classification (Priority: High)
+   Issue: Category accuracy is 66.7%, below 80% threshold
+   Suggestions:
+   - Add more diverse training examples for category embeddings
+   - Enhance category descriptions with more detailed keywords
+   - Improve chain-of-thought prompts for category classification
+   - Consider adjusting similarity thresholds in vector search
+
+2. Subcategory Classification (Priority: High)
+   Issue: Subcategory accuracy is 66.7%, below 75% threshold
+   Suggestions:
+   - Add more subcategory-specific training examples
+   - Enhance hierarchical context in subcategory prompts
+   - Review subcategory descriptions for clarity
+   - Consider parent category context in subcategory classification
+
+3. Confidence Scores (Priority: Medium)
+   Issue: Average confidence is 0.432, below 0.7 threshold
+   Suggestions:
+   - Improve embedding quality with more representative examples
+   - Enhance LLM prompts with clearer instructions
+   - Add confidence calibration based on historical performance
+   - Consider ensemble methods for more reliable predictions
+
+4. Specific Category Confusion (Priority: Medium)
+   Issue: "بيانات المنشأة" often confused with "الإرسالية" (1 times)
+   Suggestions:
+   - Add distinguishing examples between "بيانات المنشأة" and "الإرسالية"
+   - Enhance description clarity for "بيانات المنشأة" category
+   - Review and improve keywords for "بيانات المنشأة"
+   - Add negative examples in prompts to avoid confusion

@@ -1,20 +1,25 @@
 """
-MAIN INITIALIZATION SCRIPT
+MAIN INITIALIZATION SCRIPT (UPDATED)
 
 This script provides proper initialization of the ITSM classification system
-with all the fixes for the identified issues:
+using the new centralized configuration management and LLM factory pattern.
 
-1. Async initialization of Qdrant vector collections
-2. Proper OpenAI API key validation
-3. CSV hierarchy loading
-4. Error handling and fallbacks
-5. Health checks
+Key improvements:
+1. Uses ConfigurationManager for centralized configuration
+2. Uses LLMFactory for consistent LLM instance creation
+3. Simplified configuration loading and validation
+4. Better error handling and fallbacks
+5. Consistent API key management
+
+Usage:
+    python main_updated.py --csv "Category + SubCategory.csv" --test-ticket "تسجيل الدخول مشكلة"
 """
 
 import asyncio
 import logging
 import os
 import json
+import argparse
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -31,11 +36,13 @@ prevent_logger_propagation_issues()
 logger = get_logger(__name__)
 
 
-async def initialize_classification_system(csv_file_path: str = None, 
-                                         config_path: str = None,
-                                         strict_mode: bool = True) -> 'ClassificationPipeline':
+async def initialize_classification_system(
+    csv_file_path: str = None, 
+    config_path: str = None,
+    strict_mode: bool = True
+) -> 'ClassificationPipeline':
     """
-    Initialize the complete classification system with proper async handling.
+    Initialize the complete classification system using the new configuration management.
     
     Args:
         csv_file_path: Path to the category CSV file
@@ -45,156 +52,174 @@ async def initialize_classification_system(csv_file_path: str = None,
     Returns:
         Fully initialized ClassificationPipeline
     """
-    from src.config.config_validator import SystemConfig, ConfigValidator
-    from src.data.category_loader import CategoryLoader
+    from src.config.config_manager import ConfigurationManager
+    from src.config.llm_factory import LLMFactory
     from src.agents.classification_pipeline import ClassificationPipeline
+    from src.models.entities import ClassificationHierarchy
     from src.utils.classification_validator import ClassificationValidator
     from qdrant_client import QdrantClient
     
-    logger.info("Starting ITSM Classification System initialization...")
+    logger.info("🚀 Starting ITSM Classification System initialization...")
     logger.info(f"Strict mode: {'ENABLED' if strict_mode else 'DISABLED'}")
     
-    # 1. Load and validate configuration
-    logger.info("Loading configuration...")
     try:
-        if config_path and os.path.exists(config_path):
-            # Load from file if provided
-            import json
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-            # Override with strict mode setting
-            config_data['strict_category_matching'] = strict_mode
-            config_data['allow_fuzzy_matching'] = not strict_mode
-            config_data['remove_system_tags'] = True
-            config = SystemConfig(**config_data)
-        else:
-            # Load from environment variables and parameters
-            config = SystemConfig.from_env(csv_file_path or "Category + SubCategory.csv")
-            config.strict_category_matching = strict_mode
-            config.allow_fuzzy_matching = not strict_mode
-            config.remove_system_tags = True
+        # 1. Initialize Configuration Manager
+        logger.info("📋 Initializing configuration manager...")
+        config_manager = ConfigurationManager(config_path)
         
-        logger.info("Configuration loaded successfully")
-        logger.info(f"Strict matching: {config.strict_category_matching}")
+        # Override CSV path if provided
+        if csv_file_path:
+            config_manager.raw_config["data"]["csv_file_path"] = csv_file_path
         
-    except Exception as e:
-        logger.error(f"Configuration loading failed: {e}")
-        raise
-    
-    # 2. Validate configuration
-    logger.info("Validating system configuration...")
-    validation_result = ConfigValidator.validate_config(config)
-    
-    if not validation_result["is_valid"]:
-        logger.error("Configuration validation failed:")
-        for error in validation_result["errors"]:
-            logger.error(f"  - {error}")
-        raise ValueError("System configuration is invalid")
-    
-    if validation_result["warnings"]:
-        logger.warning("Configuration warnings:")
-        for warning in validation_result["warnings"]:
-            logger.warning(f"  - {warning}")
-    
-    # 3. Initialize Qdrant client
-    logger.info("Initializing Qdrant vector database...")
-    try:
-        qdrant_client = QdrantClient(url=config.qdrant_url)
-        # Test connection
-        collections = qdrant_client.get_collections()
-        logger.info(f"Qdrant connected successfully. Found {len(collections.collections)} collections.")
-    except Exception as e:
-        logger.warning(f"Qdrant connection failed: {e}")
-        logger.info("Continuing without Qdrant (will use keyword fallback)")
-        qdrant_client = None
-    
-    # 4. Load hierarchy from CSV
-    logger.info("Loading classification hierarchy from CSV...")
-    try:
-        loader = CategoryLoader()
-        hierarchy = loader.load_from_csv(config.csv_file_path)
+        # Validate configuration
+        validation_result = config_manager.validate_configuration()
+        if not validation_result["is_valid"]:
+            logger.error("❌ Configuration validation failed:")
+            for error in validation_result["errors"]:
+                logger.error(f"  - {error}")
+            raise ValueError("System configuration is invalid")
         
-        stats = loader.get_loading_stats()
-        logger.info(f"Hierarchy loaded: {stats.categories_created} categories, "
-                   f"{stats.subcategories_created} subcategories")
-        
-        # Initialize classification validator for strict mode
-        if strict_mode:
-            classification_validator = ClassificationValidator(hierarchy)
-            logger.info("Strict classification validator initialized")
-            
-            # Log valid categories for debugging
-            valid_cats = list(hierarchy.categories.keys())
-            logger.info(f"Valid categories: {', '.join(valid_cats[:5])}{'...' if len(valid_cats) > 5 else ''}")
-        
-        if stats.warnings:
-            logger.warning(f"CSV loading had {len(stats.warnings)} warnings")
-            for warning in stats.warnings[:5]:  # Show first 5 warnings
+        if validation_result["warnings"]:
+            logger.warning("⚠️ Configuration warnings:")
+            for warning in validation_result["warnings"]:
                 logger.warning(f"  - {warning}")
-                
-    except Exception as e:
-        logger.error(f"Failed to load hierarchy from CSV: {e}")
-        raise
-    
-    # 5. Create classification pipeline with async initialization
-    logger.info("Initializing classification pipeline...")
-    try:
-        pipeline = await ClassificationPipeline.create(
-            config_path=None,  # We already have loaded config
-            hierarchy=hierarchy,
-            qdrant_client=qdrant_client
-        )
         
-        # Override with our validated configuration
-        pipeline.config = config.to_agent_config_dict()
+        logger.info("✅ Configuration validation successful")
         
-        # Set strict mode on all classifiers
-        if hasattr(pipeline, 'category_classifier'):
-            pipeline.category_classifier.strict_mode = strict_mode
-            if strict_mode:
-                pipeline.category_classifier.classification_validator = classification_validator
-                # Add training examples to improve accuracy
-                logger.info("Adding category training examples...")
-                await pipeline.category_classifier.add_category_examples()
+        # 2. Test LLM Factory
+        logger.info("🧪 Testing LLM factory...")
+        test_config = config_manager.get_agent_config("category_classifier")
+        try:
+            # Test LLM creation without actually creating (just validation)
+            llm_validation = LLMFactory.validate_config(test_config)
+            if not llm_validation["is_valid"]:
+                logger.error("❌ LLM configuration validation failed:")
+                for error in llm_validation["errors"]:
+                    logger.error(f"  - {error}")
+                raise ValueError("LLM configuration is invalid")
+            logger.info("✅ LLM factory validation successful")
+        except Exception as e:
+            logger.error(f"❌ LLM factory test failed: {e}")
+            raise
+        
+        # 3. Initialize Qdrant client (optional)
+        logger.info("🔗 Initializing Qdrant vector database...")
+        qdrant_config = config_manager.get_qdrant_config()
+        try:
+            qdrant_client = QdrantClient(url=qdrant_config["url"])
+            # Test connection
+            collections = qdrant_client.get_collections()
+            logger.info(f"✅ Qdrant connected successfully. Found {len(collections.collections)} collections.")
+        except Exception as e:
+            logger.warning(f"⚠️ Qdrant connection failed: {e}")
+            logger.info("Continuing without Qdrant (will use keyword fallback)")
+            qdrant_client = None
+        
+        # 4. Load hierarchy from CSV
+        logger.info("📊 Loading classification hierarchy from CSV...")
+        data_config = config_manager.get_data_config()
+        csv_path = data_config["csv_file_path"]
+        
+        if not os.path.exists(csv_path):
+            logger.error(f"❌ CSV file not found: {csv_path}")
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        
+        try:
+            hierarchy = ClassificationHierarchy.load_from_file(csv_path)
             
-        if hasattr(pipeline, 'subcategory_classifier'):
-            pipeline.subcategory_classifier.strict_mode = strict_mode
+            # Get statistics about loaded hierarchy
+            stats = hierarchy.get_statistics()
+            logger.info(f"✅ Hierarchy loaded: {stats['total_categories']} categories, "
+                       f"{stats['total_subcategories']} subcategories")
+            
+            # Initialize classification validator for strict mode
             if strict_mode:
-                pipeline.subcategory_classifier.classification_validator = classification_validator
+                classification_validator = ClassificationValidator(hierarchy)
+                logger.info("✅ Strict classification validator initialized")
+                
+                # Log valid categories for debugging
+                valid_cats = list(hierarchy.categories.keys())
+                logger.info(f"Valid categories: {', '.join(valid_cats[:5])}{'...' if len(valid_cats) > 5 else ''}")
+            
+            if stats.get('total_categories', 0) > 0:
+                logger.info(f"Valid categories: {', '.join(list(hierarchy.categories.keys())[:5])}{'...' if len(hierarchy.categories) > 5 else ''}")
+            
+            # Note: ClassificationHierarchy doesn't provide warnings like CategoryLoader did
+            # But we can add our own validation if needed
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to load hierarchy from CSV: {e}")
+            raise
         
-        # Configure Arabic processor to remove system tags
-        if hasattr(pipeline, 'arabic_processor'):
-            pipeline.arabic_processor.remove_system_tags = config.remove_system_tags
-            pipeline.arabic_processor.system_tags_patterns = [
-                r'\(AutoClosed\)',
-                r'\(auto[_\-]?closed\)',
-                r'\[.*?closed.*?\]',
-                r'تم الإغلاق تلقائي[اً]?',
-                r'مغلق تلقائي[اً]?',
-            ]
+        # 5. Create classification pipeline using the new configuration system
+        logger.info("🤖 Initializing classification pipeline...")
+        try:
+            # Create pipeline with configuration manager
+            pipeline = await ClassificationPipeline.create(
+                config_path=None,  # Don't load config again, we already have it
+                hierarchy=hierarchy,
+                qdrant_client=qdrant_client
+            )
+            
+            # Override the pipeline's configuration with our validated configuration manager
+            pipeline.config_manager = config_manager
+            pipeline.config = config_manager.raw_config  # For backward compatibility
+            
+            # Set strict mode on all classifiers
+            if hasattr(pipeline, 'category_classifier') and pipeline.category_classifier:
+                pipeline.category_classifier.strict_mode = strict_mode
+                if strict_mode:
+                    pipeline.category_classifier.classification_validator = classification_validator
+                    logger.info("🎯 Adding category training examples...")
+                    await pipeline.category_classifier.add_category_examples()
+                
+            if hasattr(pipeline, 'subcategory_classifier'):
+                pipeline.subcategory_classifier.strict_mode = strict_mode
+                if strict_mode:
+                    pipeline.subcategory_classifier.classification_validator = classification_validator
+            
+            # Configure Arabic processor to remove system tags
+            classification_config = config_manager.get_classification_config()
+            if hasattr(pipeline, 'arabic_processor'):
+                pipeline.arabic_processor.remove_system_tags = classification_config.get("remove_system_tags", True)
+                pipeline.arabic_processor.system_tags_patterns = [
+                    r'\(AutoClosed\)',
+                    r'\(auto[_\-]?closed\)',
+                    r'\[.*?closed.*?\]',
+                    r'تم الإغلاق تلقائي[اً]?',
+                    r'مغلق تلقائي[اً]?',
+                ]
+            
+            logger.info("✅ Classification pipeline initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Pipeline initialization failed: {e}")
+            raise
         
-        logger.info("Classification pipeline initialized successfully")
+        # 6. Perform system health check
+        logger.info("🏥 Performing system health check...")
+        
+        # Check all agents are properly initialized
+        agents = ['orchestrator', 'arabic_processor', 'subcategory_classifier']
+        for agent_name in agents:
+            agent = getattr(pipeline, agent_name, None)
+            if agent and hasattr(agent, 'config'):
+                logger.info(f"  ✅ {agent_name} agent: initialized")
+            else:
+                logger.warning(f"  ⚠️ {agent_name} agent: not properly initialized")
+        
+        # Check category classifier (async-initialized)
+        if pipeline.category_classifier:
+            logger.info("  ✅ category_classifier agent: initialized")
+        else:
+            logger.warning("  ⚠️ category_classifier agent: not yet initialized")
+        
+        logger.info("🎉 ITSM Classification System initialization completed successfully!")
+        return pipeline
         
     except Exception as e:
-        logger.error(f"Pipeline initialization failed: {e}")
+        logger.error(f"💥 System initialization failed: {e}")
         raise
-    
-    # 6. Perform health check
-    logger.info("Performing system health check...")
-    health_status = ConfigValidator.check_system_health(config)
-    
-    if health_status["overall_healthy"]:
-        logger.info("✅ System is healthy and ready for classification")
-    else:
-        logger.warning("⚠️ System has some issues but may still function:")
-        for component, status in health_status["details"].items():
-            if health_status.get(component, False):
-                logger.info(f"  ✅ {component}: {status}")
-            else:
-                logger.warning(f"  ❌ {component}: {status}")
-    
-    logger.info("ITSM Classification System initialization completed")
-    return pipeline
 
 
 async def classify_ticket(pipeline, ticket_text: str, ticket_id: str = None) -> dict:
@@ -210,16 +235,16 @@ async def classify_ticket(pipeline, ticket_text: str, ticket_id: str = None) -> 
         Classification results
     """
     try:
-        logger.info(f"Classifying ticket: {ticket_id or 'auto-generated'}")
+        logger.info(f"🎫 Classifying ticket: {ticket_id or 'auto-generated'}")
         
         # Use the pipeline's classify_ticket method directly
         result = await pipeline.classify_ticket(ticket_text, ticket_id)
         
-        logger.info(f"Classification completed for ticket {ticket_id}")
+        logger.info(f"✅ Classification completed for ticket {ticket_id}")
         return result
         
     except Exception as e:
-        logger.error(f"Ticket classification failed: {e}")
+        logger.error(f"❌ Ticket classification failed: {e}")
         return {
             "ticket_id": ticket_id,
             "error": str(e),
@@ -227,61 +252,67 @@ async def classify_ticket(pipeline, ticket_text: str, ticket_id: str = None) -> 
         }
 
 
-def create_sample_config_file(file_path: str = "config.json"):
-    """Create a sample configuration file"""
-    sample_config = {
-        "openai_api_key": "sk-your-api-key-here",
-        "openai_model": "gpt-4o-mini",
-        "openai_temperature": 0.1,
-        "openai_max_tokens": 1000,
-        "qdrant_url": "http://localhost:6333",
-        "qdrant_collection": "itsm_categories",
-        "csv_file_path": "Category + SubCategory.csv",
-        "confidence_threshold": 0.7,
-        "embedding_model": "text-embedding-3-small"
-    }
-    
-    import json
-    with open(file_path, 'w') as f:
-        json.dump(sample_config, f, indent=2)
-    
-    print(f"Sample configuration created at: {file_path}")
-    print("Please update the OpenAI API key and other settings as needed.")
+def create_sample_config_file(file_path: str = "itsm_config.json"):
+    """Create a sample configuration file using the configuration manager"""
+    from src.config.config_manager import create_sample_config_file as create_config
+    create_config(file_path)
 
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="ITSM Classification System")
+async def main():
+    """Main entry point with command line argument support"""
+    parser = argparse.ArgumentParser(description="ITSM Classification System (Updated)")
     parser.add_argument("--csv", default="Category + SubCategory.csv", 
                        help="Path to category CSV file")
     parser.add_argument("--config", help="Path to configuration file")
     parser.add_argument("--create-config", action="store_true", 
                        help="Create sample configuration file")
     parser.add_argument("--test-ticket", help="Test classification with this text")
+    parser.add_argument("--strict-mode", action="store_true", default=True,
+                       help="Enable strict category matching (default: True)")
+    parser.add_argument("--no-strict-mode", action="store_false", dest="strict_mode",
+                       help="Disable strict category matching")
     
     args = parser.parse_args()
     
     if args.create_config:
         create_sample_config_file()
-        exit(0)
+        return
     
-    async def main():
-        try:
-            # Initialize system
-            pipeline = await initialize_classification_system(args.csv, args.config)
+    try:
+        # Initialize system
+        logger.info("=" * 60)
+        logger.info("🚀 ITSM Classification System (Updated with Config Manager)")
+        logger.info("=" * 60)
+        
+        pipeline = await initialize_classification_system(
+            csv_file_path=args.csv,
+            config_path=args.config,
+            strict_mode=args.strict_mode
+        )
+        
+        # Test with sample ticket if provided
+        if args.test_ticket:
+            logger.info("🧪 Testing classification...")
+            result = await classify_ticket(pipeline, args.test_ticket)
             
-            # Test with sample ticket if provided
-            if args.test_ticket:
-                result = await classify_ticket(pipeline, args.test_ticket)
-                print("Classification Result:")
-                print(json.dumps(result, indent=2, ensure_ascii=False))
-            else:
-                print("System initialized successfully. Use --test-ticket to test classification.")
-                
-        except Exception as e:
-            logger.error(f"System initialization failed: {e}")
-            exit(1)
-    
+            print("\n" + "=" * 50)
+            print("📊 CLASSIFICATION RESULT")
+            print("=" * 50)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print("\n" + "=" * 50)
+            print("✅ System initialized successfully!")
+            print("💡 Use --test-ticket 'your text here' to test classification.")
+            print("🔧 Use --create-config to create a sample configuration file.")
+            print("=" * 50)
+            
+    except Exception as e:
+        logger.error(f"💥 System initialization failed: {e}")
+        print(f"\n❌ Error: {e}")
+        print("🔧 Try using --create-config to create a proper configuration file.")
+        exit(1)
+
+
+if __name__ == "__main__":
     # Run the async main function
     asyncio.run(main())

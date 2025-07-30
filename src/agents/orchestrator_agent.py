@@ -27,7 +27,7 @@ DESIGN DECISIONS:
 
 INTEGRATION POINTS:
 - StateManager: Persists workflow state and configuration
-- CategoryLoader: Loads company-specific classification hierarchy
+- ClassificationHierarchy: Loads and manages category hierarchy
 - Agent Pipeline: Initiates the multi-agent processing sequence
 - Business Rules: Applies company-specific routing and priority logic
 """
@@ -39,7 +39,7 @@ from datetime import datetime
 from .base_agent import BaseAgent, BaseAgentConfig, AgentType
 from ..models.ticket_state import TicketState
 from ..state.state_manager import StateManager
-from ..data.category_loader import CategoryLoader, LoaderConfig
+from ..models.entities import ClassificationHierarchy
 
 
 class OrchestratorAgent(BaseAgent):
@@ -53,20 +53,10 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self, config: BaseAgentConfig, state_manager: StateManager):
         super().__init__(config)
         self.state_manager = state_manager
-        self.category_loader = None
+        self.hierarchy = None  # Will be set by pipeline if needed
         self.business_rules = self._load_business_rules()
         
-        # Initialize category loader if needed
-        self._initialize_category_loader()
-    
-    def _initialize_category_loader(self):
-        """Initialize the category loader for hierarchy access"""
-        try:
-            loader_config = LoaderConfig()
-            self.category_loader = CategoryLoader(loader_config)
-            self.logger.info("Category loader initialized successfully")
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize category loader: {e}")
+        self.logger.info("Orchestrator agent initialized successfully")
     
     def _load_business_rules(self) -> Dict[str, Any]:
         """Load business rules for routing and escalation"""
@@ -255,24 +245,21 @@ class OrchestratorAgent(BaseAgent):
         """Initialize context for downstream agents"""
         
         # Load category hierarchy if available
-        if self.category_loader:
+        if self.hierarchy:
             try:
-                # For now, use a default CSV file name
-                # In production, this would be company-specific
-                csv_file = "Category + SubCategory.csv"
-                hierarchy = await self._load_classification_hierarchy(csv_file)
-                
-                if hierarchy:
-                    state.processing_metadata['hierarchy_loaded'] = True
-                    state.processing_metadata['total_categories'] = hierarchy.total_categories
-                    state.processing_metadata['total_subcategories'] = hierarchy.total_subcategories
-                else:
-                    state.processing_metadata['hierarchy_loaded'] = False
+                # Set hierarchy information in processing metadata
+                stats = self.hierarchy.get_statistics()
+                state.processing_metadata['hierarchy_loaded'] = True
+                state.processing_metadata['total_categories'] = stats.get('total_categories', 0)
+                state.processing_metadata['total_subcategories'] = stats.get('total_subcategories', 0)
                     
             except Exception as e:
-                self.logger.warning(f"Failed to load hierarchy: {e}")
+                self.logger.warning(f"Failed to access hierarchy: {e}")
                 state.processing_metadata['hierarchy_loaded'] = False
                 state.processing_metadata['hierarchy_error'] = str(e)
+        else:
+            # No hierarchy available - will be loaded by pipeline
+            state.processing_metadata['hierarchy_loaded'] = False
         
         # Set processing timeouts based on business rules
         timeouts = self.business_rules["timeout_rules"]
@@ -287,18 +274,11 @@ class OrchestratorAgent(BaseAgent):
             'timestamp': datetime.now().isoformat(),
             'processing_time_ms': 0  # Will be calculated by base class
         }
-    
-    async def _load_classification_hierarchy(self, csv_file: str):
-        """Load the classification hierarchy from CSV"""
-        try:
-            hierarchy = self.category_loader.load_from_csv(csv_file)
-            return hierarchy
-        except FileNotFoundError:
-            self.logger.warning(f"CSV file {csv_file} not found")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error loading hierarchy: {e}")
-            return None
+
+    def set_hierarchy(self, hierarchy: ClassificationHierarchy):
+        """Set the classification hierarchy for this agent"""
+        self.hierarchy = hierarchy
+        self.logger.info("Classification hierarchy set successfully")
     
     async def _set_workflow_metadata(self, state: TicketState) -> None:
         """Set metadata for workflow tracking and debugging"""
@@ -351,7 +331,7 @@ class OrchestratorAgent(BaseAgent):
         stats = {
             'agent_metrics': self.metrics.dict(),
             'business_rules': self.business_rules,
-            'category_loader_status': self.category_loader is not None
+            'hierarchy_status': self.hierarchy is not None
         }
         
         return stats

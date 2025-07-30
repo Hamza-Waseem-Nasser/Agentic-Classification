@@ -49,6 +49,7 @@ from openai import AsyncOpenAI
 from .base_agent import BaseAgent, BaseAgentConfig, AgentType
 from ..models.ticket_state import TicketState
 from ..models.entities import Category, ClassificationHierarchy
+from ..config.llm_factory import LLMFactory
 
 
 class CategoryClassifierAgent(BaseAgent):
@@ -72,10 +73,8 @@ class CategoryClassifierAgent(BaseAgent):
         # Initialize Qdrant client
         self.qdrant_client = QdrantClient(url=qdrant_url)
         
-        # Initialize OpenAI client for embeddings - with API key validation
-        if not config.api_key:
-            raise ValueError("OpenAI API key is required for embeddings")
-        self.openai_client = AsyncOpenAI(api_key=config.api_key)
+        # Initialize OpenAI client for embeddings using factory
+        self.openai_client = LLMFactory.create_async_openai(config)
         
         # Classification parameters - get from config
         self.embedding_model = getattr(config, 'embedding_model', "text-embedding-3-small")
